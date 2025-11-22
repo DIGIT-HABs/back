@@ -1,0 +1,97 @@
+# Core Django
+Django==4.2.16
+djangorestframework==3.14.0
+djangorestframework-simplejwt==5.3.1
+django-cors-headers==4.4.0
+django-filter==24.3
+django-environ==0.11.2
+python-decouple==3.8
+Pillow==12.0.0
+
+# Database
+psycopg2-binary==2.9.9
+django-extensions==3.2.3
+
+# Authentication & Security
+django-allauth==64.2.0
+rest-social-auth==9.0.0
+
+# API Documentation
+drf-spectacular==0.27.2
+drf-spectacular-sidecar==2024.7.1
+
+# Background Tasks
+celery==5.4.0
+redis==5.0.8
+
+# File Storage
+django-storages==1.14.4
+cloudinary==1.44.1
+
+# Data Validation & Serialization
+pydantic==2.9.2
+pydantic-settings==2.6.1
+
+# Geospatial
+# django.contrib.gis is part of Django core, no need to install separately
+
+# Testing
+pytest==8.3.3
+pytest-django==4.9.0
+pytest-mock==3.14.0
+factory-boy==3.3.1
+
+# Development
+ipython==8.27.0
+django-debug-toolbar==4.2.0
+black==24.8.0
+isort==5.13.2
+
+# Monitoring
+django-prometheus==2.3.1
+sentry-sdk[django]==2.18.0
+
+# Date & Time
+python-dateutil==2.9.0.post0
+
+# HTTP Client
+requests==2.32.3
+httpx==0.27.2
+
+# WebSockets & Real-time (Django Channels)
+channels==4.1.0
+channels-redis==4.2.0
+daphne==4.1.0
+
+# Geocoding & Location Services
+geopy==2.4.1
+geocoder==1.38.1
+fiona==1.9.6
+shapely==2.0.4
+
+# Date & Time Processing
+pytz==2024.2
+pytzdata==2020.1
+babel==2.16.0
+
+# Cache & Performance
+django-redis==5.4.0
+redis==5.0.8
+django-cachalot==2.7.0
+
+# Notification Services
+twilio==9.3.6
+celery[redis]==5.4.0
+flower==2.0.1
+
+# Payment Processing (already configured)
+stripe==10.10.0
+
+# Machine Learning & Optimization
+scipy==1.14.1
+numpy==2.1.3
+pandas==2.2.3
+
+# Job Scheduling
+django-celery-beat==2.7.0
+django-celery-results==2.5.1

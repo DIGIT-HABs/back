@@ -1,0 +1,4 @@
+"""
+Favorites app initialization.
+"""
+

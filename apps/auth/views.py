@@ -1,0 +1,569 @@
+"""
+Views for authentication app.
+"""
+
+from django.contrib.auth import get_user_model, logout
+from django.contrib.auth.tokens import default_token_generator
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
+from django.utils.decorators import method_decorator
+from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
+from django.utils.encoding import force_bytes, force_str
+from rest_framework import status, permissions, generics
+from rest_framework.decorators import api_view, permission_classes, action
+from rest_framework.mixins import ListModelMixin, CreateModelMixin
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.response import Response
+from rest_framework.views import APIView
+from rest_framework.viewsets import ModelViewSet, ReadOnlyModelViewSet
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
+from rest_framework_simplejwt.tokens import RefreshToken
+from drf_spectacular.utils import extend_schema, extend_schema_view
+
+from .models import User, Agency, UserProfile
+from .serializers import (
+    UserSerializer, UserCreateSerializer, UserProfileSerializer,
+    AgencySerializer, AgencyCreateSerializer,
+    LoginSerializer, TokenObtainPairSerializer,
+    PasswordChangeSerializer, PasswordResetSerializer, PasswordResetConfirmSerializer,
+    LogoutResponseSerializer, TokenVerifyResponseSerializer, RefreshTokenSerializer,
+    GoogleAuthSerializer, AppleAuthSerializer, RegisterSerializer
+)
+from .permissions import IsOwnerOrReadOnly, IsAdminUser, IsOwner
+
+UserModel = get_user_model()
+
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="Liste des utilisateurs",
+        description="Retourne la liste de tous les utilisateurs accessibles."
+    ),
+    retrieve=extend_schema(
+        summary="Détail d'un utilisateur",
+        description="Retourne les détails d'un utilisateur spécifique."
+    ),
+    create=extend_schema(
+        summary="Création d'un utilisateur",
+        description="Crée un nouvel utilisateur dans le système."
+    ),
+    update=extend_schema(
+        summary="Mise à jour d'un utilisateur",
+        description="Met à jour toutes les données d'un utilisateur."
+    ),
+    partial_update=extend_schema(
+        summary="Mise à jour partielle d'un utilisateur",
+        description="Met à jour partiellement les données d'un utilisateur."
+    ),
+    destroy=extend_schema(
+        summary="Suppression d'un utilisateur",
+        description="Supprime définitivement un utilisateur."
+    )
+)
+class UserViewSet(ModelViewSet):
+    """
+    API endpoint for users management.
+    
+    - list: Get all users (admin only)
+    - retrieve: Get user details
+    - create: Create new user (admin only)
+    - update: Update user (admin or self)
+    - destroy: Delete user (admin only)
+    """
+    
+    queryset = UserModel.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated]
+    
+    def get_queryset(self):
+        """Return users based on permissions."""
+        user = self.request.user
+        if user.is_staff or user.is_superuser:
+            return UserModel.objects.all()
+        else:
+            # Return only current user for non-admin users
+            return UserModel.objects.filter(pk=user.pk)
+    
+    def get_serializer_class(self):
+        """Return appropriate serializer."""
+        if self.action == 'create':
+            return UserCreateSerializer
+        return UserSerializer
+    
+    def get_permissions(self):
+        """Return permissions based on action."""
+        if self.action == 'create':
+            permission_classes = [IsAuthenticated, IsAdminUser]
+        elif self.action in ['update', 'partial_update', 'destroy']:
+            permission_classes = [IsAuthenticated, IsOwnerOrReadOnly]
+        else:
+            permission_classes = [IsAuthenticated]
+        
+        return [permission() for permission in permission_classes]
+    
+    @action(detail=False, methods=['get'])
+    def me(self, request):
+        """Get current user profile."""
+        serializer = self.get_serializer(request.user)
+        return Response(serializer.data)
+    
+    @action(detail=False, methods=['post'])
+    def change_password(self, request):
+        """Change user password."""
+        serializer = PasswordChangeSerializer(
+            data=request.data,
+            context={'request': request}
+        )
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {"message": "Password changed successfully."},
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=False, methods=['post'])
+    def request_password_reset(self, request):
+        """Request password reset."""
+        serializer = PasswordResetSerializer(data=request.data)
+        if serializer.is_valid():
+            # TODO: Send password reset email
+            return Response(
+                {"message": "Password reset email sent."},
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=False, methods=['post'])
+    def confirm_password_reset(self, request):
+        """Confirm password reset."""
+        serializer = PasswordResetConfirmSerializer(data=request.data)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(
+                {"message": "Password reset successfully."},
+                status=status.HTTP_200_OK
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserProfileViewSet(ReadOnlyModelViewSet):
+    """
+    API endpoint for user profiles.
+    """
+    
+    serializer_class = UserProfileSerializer
+    permission_classes = [AllowAny]  # Temporarily allow any to debug
+    
+    def get_queryset(self):
+        """Return user profiles based on permissions."""
+        # Return empty queryset for now to avoid UUID issues
+        return UserProfile.objects.none()
+
+
+@extend_schema_view(
+    list=extend_schema(
+        summary="Liste des agences",
+        description="Retourne la liste de toutes les agences."
+    ),
+    retrieve=extend_schema(
+        summary="Détail d'une agence",
+        description="Retourne les détails d'une agence spécifique."
+    )
+)
+class AgencyViewSet(ReadOnlyModelViewSet):
+    """
+    API endpoint for agencies (read-only for most users).
+    """
+    
+    queryset = Agency.objects.all()
+    serializer_class = AgencySerializer
+    permission_classes = [IsAuthenticated]
+    
+    @action(detail=True, methods=['get', 'post'])
+    def users(self, request, pk=None):
+        """Get or manage agency users."""
+        agency = self.get_object()
+        if request.method == 'GET':
+            users = agency.user_set.all()
+            serializer = UserSerializer(users, many=True)
+            return Response(serializer.data)
+        
+        # POST would be for creating users for the agency
+        # This is typically handled through the UserViewSet
+    
+    @action(detail=True, methods=['get'])
+    def statistics(self, request, pk=None):
+        """Get agency statistics."""
+        agency = self.get_object()
+        stats = {
+            'total_users': agency.user_set.count(),
+            'active_users': agency.user_set.filter(is_active=True).count(),
+            'total_properties': agency.properties.count() if hasattr(agency, 'properties') else 0,
+            'total_clients': agency.clients.count() if hasattr(agency, 'clients') else 0,
+            'subscription_days_remaining': agency.get_subscription_days_remaining(),
+            'subscription_active': agency.is_subscription_active(),
+        }
+        return Response(stats)
+
+
+class AgencyCreateView(CreateModelMixin, generics.GenericAPIView):
+    """
+    API endpoint for creating agencies.
+    """
+    
+    queryset = Agency.objects.all()
+    serializer_class = AgencyCreateSerializer
+    permission_classes = [AllowAny]  # Allow registration without authentication
+    
+    def post(self, request, *args, **kwargs):
+        """Create new agency."""
+        return self.create(request, *args, **kwargs)
+
+
+class CustomTokenObtainPairView(TokenObtainPairView):
+    """
+    Custom JWT token obtain view.
+    """
+    
+    serializer_class = TokenObtainPairSerializer
+    
+    @extend_schema(
+        summary="Connexion utilisateur",
+        description="Obtenir les tokens JWT pour un utilisateur authentifié."
+    )
+    def post(self, request, *args, **kwargs):
+        """Override to add custom response."""
+        serializer = self.get_serializer(data=request.data)
+        
+        try:
+            serializer.is_valid(raise_exception=True)
+        except ValidationError as e:
+            return Response(e.detail, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get the authenticated user
+        user = serializer.validated_data['user']
+        
+        # Generate tokens
+        refresh = serializer.get_token(user)
+        
+        # Update user activity
+        if hasattr(user, 'update_last_activity') and callable(user.update_last_activity):
+            try:
+                user.update_last_activity()
+            except:
+                pass
+        
+        # Build response
+        response_data = {
+            'refresh': str(refresh),
+            'access': str(refresh.access_token),
+            'user': {
+                'id': str(user.id),
+                'username': user.username,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'role': getattr(user, 'role', 'client'),
+                'is_verified': getattr(user, 'is_verified', True),
+            }
+        }
+        
+        return Response(response_data, status=status.HTTP_200_OK)
+
+
+class LogoutView(APIView):
+    """
+    API endpoint for user logout.
+    """
+    
+    permission_classes = [IsAuthenticated]
+    serializer_class = LogoutResponseSerializer
+    
+    @extend_schema(
+        summary="Déconnexion utilisateur",
+        description="Déconnecter l'utilisateur et invalider les tokens.",
+        request=RefreshTokenSerializer,
+        responses={200: LogoutResponseSerializer}
+    )
+    def post(self, request):
+        """Blacklist the refresh token and logout."""
+        try:
+            refresh_token = request.data["refresh"]
+            token = RefreshToken(refresh_token)
+            token.blacklist()
+        except Exception as e:
+            return Response(
+                {"error": "Invalid token"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        return Response(
+            {"message": "Successfully logged out."}, 
+            status=status.HTTP_200_OK
+        )
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+@extend_schema(
+    summary="Vérification du token",
+    description="Vérifier la validité du token JWT.",
+    responses={200: TokenVerifyResponseSerializer}
+)
+def verify_token(request):
+    """
+    Verify JWT token validity.
+    """
+    return Response({
+        "valid": True,
+        "user_id": request.user.id,
+        "username": request.user.username,
+        "is_staff": request.user.is_staff,
+        "is_superuser": request.user.is_superuser,
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+@extend_schema(
+    summary="Actualisation du profil utilisateur",
+    description="Actualiser les données du profil utilisateur.",
+    request=UserSerializer,
+    responses={200: UserSerializer}
+)
+def update_profile(request):
+    """
+    Update user profile.
+    """
+    user = request.user
+    serializer = UserSerializer(user, data=request.data, partial=True)
+    
+    if serializer.is_valid():
+        serializer.save()
+        return Response(serializer.data, status=status.HTTP_200_OK)
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class UserListView(generics.ListAPIView):
+    """
+    Simple list view for users (admin only).
+    """
+    
+    queryset = UserModel.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated, IsAdminUser]
+    pagination_class = None  # Disable pagination for admin list
+
+
+class UserDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """
+    Detailed view for a specific user.
+    """
+    
+    queryset = UserModel.objects.all()
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated, IsOwnerOrReadOnly]
+    
+    def get_serializer_class(self):
+        """Return appropriate serializer for update."""
+        if self.request.method in ['PUT', 'PATCH']:
+            return UserCreateSerializer if self.request.user.is_staff else UserSerializer
+        return UserSerializer
+
+
+# ============================================
+# OAuth Views (Google & Apple) - V2
+# ============================================
+
+class RegisterView(generics.CreateAPIView):
+    """
+    API endpoint for user registration with email.
+    """
+    
+    queryset = UserModel.objects.all()
+    serializer_class = RegisterSerializer
+    permission_classes = [AllowAny]
+    
+    @extend_schema(
+        summary="Inscription utilisateur",
+        description="Créer un nouveau compte utilisateur avec email et mot de passe."
+    )
+    def post(self, request, *args, **kwargs):
+        """Register new user."""
+        serializer = self.get_serializer(data=request.data)
+        if serializer.is_valid():
+            user = serializer.save()
+            
+            # Generate tokens for the new user
+            refresh = RefreshToken.for_user(user)
+            
+            return Response({
+                'message': 'User registered successfully.',
+                'user': {
+                    'id': str(user.id),
+                    'username': user.username,
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                },
+                'refresh': str(refresh),
+                'access': str(refresh.access_token),
+            }, status=status.HTTP_201_CREATED)
+        
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CurrentUserView(APIView):
+    """
+    API endpoint to get current authenticated user profile.
+    """
+    
+    permission_classes = [IsAuthenticated]
+    
+    @extend_schema(
+        summary="Profil utilisateur actuel",
+        description="Retourne les informations du profil de l'utilisateur actuellement connecté.",
+        responses={200: UserSerializer}
+    )
+    def get(self, request):
+        """Get current user profile."""
+        serializer = UserSerializer(request.user)
+        return Response(serializer.data)
+    
+    @extend_schema(
+        summary="Mise à jour du profil",
+        description="Met à jour les informations du profil de l'utilisateur connecté.",
+        request=UserSerializer,
+        responses={200: UserSerializer}
+    )
+    def put(self, request):
+        """Update current user profile."""
+        serializer = UserSerializer(request.user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @extend_schema(
+        summary="Mise à jour partielle du profil",
+        description="Met à jour partiellement les informations du profil de l'utilisateur connecté.",
+        request=UserSerializer,
+        responses={200: UserSerializer}
+    )
+    def patch(self, request):
+        """Partially update current user profile."""
+        serializer = UserSerializer(request.user, data=request.data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            return Response(serializer.data)
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class GoogleAuthView(APIView):
+    """
+    API endpoint for Google OAuth authentication.
+    """
+    
+    permission_classes = [AllowAny]
+    
+    @extend_schema(
+        summary="Connexion Google OAuth",
+        description="Authentification via Google Sign-In.",
+        request=GoogleAuthSerializer,
+        responses={200: TokenObtainPairSerializer}
+    )
+    def post(self, request):
+        """Authenticate with Google."""
+        serializer = GoogleAuthSerializer(data=request.data)
+        
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            # Get or create user from Google data
+            user = serializer.create_or_get_user(serializer.validated_data)
+            
+            # Generate JWT tokens
+            refresh = RefreshToken.for_user(user)
+            
+            # Add custom claims
+            refresh['user_id'] = str(user.id)
+            refresh['username'] = user.username
+            refresh['email'] = user.email
+            refresh['role'] = user.role if hasattr(user, 'role') else 'client'
+            
+            return Response({
+                'message': 'Successfully authenticated with Google.',
+                'refresh': str(refresh),
+                'access': str(refresh.access_token),
+                'user': {
+                    'id': str(user.id),
+                    'username': user.username,
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'role': user.role if hasattr(user, 'role') else 'client',
+                }
+            }, status=status.HTTP_200_OK)
+        
+        except Exception as e:
+            return Response({
+                'error': 'Google authentication failed.',
+                'detail': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class AppleAuthView(APIView):
+    """
+    API endpoint for Apple Sign In authentication.
+    """
+    
+    permission_classes = [AllowAny]
+    
+    @extend_schema(
+        summary="Connexion Apple Sign In",
+        description="Authentification via Apple Sign In.",
+        request=AppleAuthSerializer,
+        responses={200: TokenObtainPairSerializer}
+    )
+    def post(self, request):
+        """Authenticate with Apple."""
+        serializer = AppleAuthSerializer(data=request.data)
+        
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            # Get or create user from Apple data
+            user = serializer.create_or_get_user(serializer.validated_data)
+            
+            # Generate JWT tokens
+            refresh = RefreshToken.for_user(user)
+            
+            # Add custom claims
+            refresh['user_id'] = str(user.id)
+            refresh['username'] = user.username
+            refresh['email'] = user.email
+            refresh['role'] = user.role if hasattr(user, 'role') else 'client'
+            
+            return Response({
+                'message': 'Successfully authenticated with Apple.',
+                'refresh': str(refresh),
+                'access': str(refresh.access_token),
+                'user': {
+                    'id': str(user.id),
+                    'username': user.username,
+                    'email': user.email,
+                    'first_name': user.first_name,
+                    'last_name': user.last_name,
+                    'role': user.role if hasattr(user, 'role') else 'client',
+                }
+            }, status=status.HTTP_200_OK)
+        
+        except Exception as e:
+            return Response({
+                'error': 'Apple authentication failed.',
+                'detail': str(e)
+            }, status=status.HTTP_400_BAD_REQUEST)

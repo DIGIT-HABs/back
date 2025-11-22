@@ -1,0 +1,17 @@
+# OAuth 2.0 Dependencies for Google & Apple Authentication
+# Install with: pip install -r requirements-oauth.txt
+
+# Google OAuth
+google-auth==2.25.2
+google-auth-oauthlib==1.2.0
+google-auth-httplib2==0.2.0
+
+# Apple Sign In
+PyJWT==2.8.0
+cryptography==41.0.7
+
+# Social Authentication (Alternative - includes Google, Apple, Facebook, etc.)
+# Uncomment if you want to use django-allauth instead of custom implementation
+# django-allauth==0.58.2
+# dj-rest-auth==5.0.2
+
