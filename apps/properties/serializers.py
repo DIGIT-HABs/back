@@ -31,6 +31,7 @@ class PropertyVisitSerializer(serializers.ModelSerializer):
     """Serializer for property visits."""
     property_title = serializers.CharField(source='property.title', read_only=True)
     property_address = serializers.CharField(source='property.get_full_address', read_only=True)
+    property_type_display = serializers.CharField(source='property.property_type_display', read_only=True)
     client_name = serializers.CharField(source='client.get_full_name', read_only=True)
     client_phone = serializers.CharField(source='client.phone', read_only=True)
     agent_name = serializers.CharField(source='agent.get_full_name', read_only=True)
@@ -38,7 +39,7 @@ class PropertyVisitSerializer(serializers.ModelSerializer):
     class Meta:
         model = PropertyVisit
         fields = [
-            'id', 'property', 'property_title', 'property_address', 
+            'id', 'property', 'property_title', 'property_address', 'property_type_display',
             'client', 'client_name', 'client_phone',
             'visit_type', 'scheduled_date', 'duration_minutes',
             'visitor_name', 'visitor_email', 'visitor_phone', 'visitor_count',
@@ -47,16 +48,8 @@ class PropertyVisitSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             'id', 'created_at', 'updated_at', 'property_title', 
-            'property_address', 'client_name', 'client_phone', 'agent_name'
+            'property_address', 'property_type_display', 'client_name', 'client_phone', 'agent_name'
         ]
-    
-    def validate_scheduled_date(self, value):
-        """Validate that the scheduled date is in the future."""
-        from django.utils import timezone
-        if value < timezone.now():
-            raise serializers.ValidationError("La date de visite doit être dans le futur.")
-        return value
-
 
 class PropertySerializer(serializers.ModelSerializer):
     """Serializer for property listings."""
@@ -88,18 +81,50 @@ class PropertySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'title', 'description', 'property_type', 'status',
             'price', 'full_price', 'surface_area', 'bedrooms', 'bathrooms', 'rooms', 'floor',
-            'year_built', 'heating_type', 'furnished', 'has_parking', 'has_balcony', 'has_terrace',
-            'has_garden', 'has_pool', 'has_elevator', 'address_line1', 'address_line2', 'city', 'country',
-            'postal_code', 'latitude', 'longitude', 'amenities', 'additional_features',
+            'year_built', 'heating_type', 'furnished', 
+            # Basic Features
+            'has_parking', 'has_balcony', 'has_terrace', 'has_garden', 'has_pool', 'has_elevator',
+            'has_garage', 'has_fireplace', 'has_air_conditioning', 'has_security_system',
+            # Bathroom Features
+            'has_bathtub', 'has_outdoor_shower', 'has_hot_water',
+            # Bedroom & Laundry Features
+            'has_washing_machine', 'has_dryer', 'has_essentials', 'has_hangers', 'has_sheets',
+            'has_extra_pillows_blankets', 'has_blinds', 'has_iron', 'has_clothes_rack', 'has_clothes_storage',
+            # Entertainment & Family
+            'has_tv', 'has_baby_crib', 'has_children_playroom',
+            # Heating & Cooling
+            'has_portable_fans', 'has_heating',
+            # Security
+            'has_outdoor_security_cameras', 'has_security_cameras', 'has_smoke_detector', 'has_carbon_monoxide_detector',
+            # Internet & Office
+            'has_wifi', 'has_portable_wifi',
+            # Kitchen & Dining
+            'has_kitchen', 'has_refrigerator', 'has_microwave', 'has_basic_kitchen_equipment',
+            'has_dishes_utensils', 'has_freezer', 'has_dishwasher', 'has_stove', 'has_oven',
+            'has_coffee_maker', 'has_blender', 'has_dining_table',
+            # Outdoor
+            'has_backyard', 'has_outdoor_furniture', 'has_outdoor_dining_space',
+            'has_outdoor_kitchen', 'has_lounge_chairs',
+            # Parking & Facilities
+            'has_free_parking_on_premises', 'has_free_street_parking', 'has_year_round_pool',
+            # Services
+            'has_luggage_dropoff_allowed', 'has_long_term_stays_allowed',
+            'has_cleaning_during_stay', 'has_key_exchange_by_host',
+            # Location
+            'address_line1', 'address_line2', 'city', 'country', 'postal_code', 'latitude', 'longitude',
+            # Additional
+            'amenities', 'additional_features', 'furnished_level',
+            # Relations
             'agent', 'agent_name', 'agency', 'agency_name',
+            # Metadata
             'is_featured', 'view_count', 'available_from', 'created_at', 'updated_at',
             'images', 'documents', 'primary_image_url', 'price_per_sqm', 'formatted_address',
-            'images_data'
+            'images_data', 'property_type_display'
         ]
         read_only_fields = [
             'id', 'view_count', 'created_at', 'updated_at', 'agent', 'agent_name',
             'agency', 'agency_name', 'images', 'documents', 'primary_image_url',
-            'full_price', 'price_per_sqm', 'formatted_address'
+            'full_price', 'price_per_sqm', 'formatted_address', 'property_type_display'
         ]
     
     def get_primary_image_url(self, obj):
@@ -198,7 +223,7 @@ class PropertyListSerializer(serializers.ModelSerializer):
             'id', 'title', 'property_type', 'status',
             'price', 'full_price', 'surface_area', 'bedrooms', 'bathrooms', 'city',
             'agent_name', 'is_featured', 'primary_image_url', 'price_per_sqm',
-            'created_at'
+            'created_at', 'property_type_display'
         ]
     
     def get_primary_image_url(self, obj):
@@ -226,4 +251,4 @@ class PropertySearchSerializer(serializers.ModelSerializer):
     class Meta:
         model = Property
         fields = ['id', 'title', 'property_type', 'status', 
-                 'price', 'surface_area', 'bedrooms', 'bathrooms', 'city', 'latitude', 'longitude']
+                 'price', 'surface_area', 'bedrooms', 'bathrooms', 'city', 'latitude', 'longitude', 'property_type_display']

@@ -237,18 +237,23 @@ class ClientAvailabilityViewSet(viewsets.ModelViewSet):
     
     def get_queryset(self):
         """Retourne les disponibilités de l'utilisateur ou de ses clients"""
-        if self.request.user.is_superuser:
+        user = self.request.user
+        
+        if user.is_superuser:
             return ClientAvailability.objects.all().select_related('user')
         
         # Agents peuvent voir les disponibilités de leurs clients
-        if hasattr(self.request.user, 'profile'):
-            if self.request.user.profile.role in ['agent', 'manager', 'admin']:
-                # Retourner les disponibilités des clients assignés
-                return ClientAvailability.objects.filter(
-                    user__profile__assigned_agent=self.request.user
-                ).select_related('user')
+        try:
+            if hasattr(user, 'profile') and user.profile:
+                if user.profile.role in ['agent', 'manager', 'admin']:
+                    # Retourner les disponibilités des clients assignés
+                    return ClientAvailability.objects.filter(
+                        user__profile__assigned_agent=user
+                    ).select_related('user')
+        except AttributeError:
+            pass
         
-        return ClientAvailability.objects.filter(user=self.request.user).select_related('user')
+        return ClientAvailability.objects.filter(user=user).select_related('user')
     
     def perform_create(self, serializer):
         """Crée les disponibilités pour l'utilisateur courant"""
@@ -278,7 +283,7 @@ class VisitScheduleViewSet(viewsets.ModelViewSet):
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
             permission_classes = [IsAuthenticated, CanScheduleVisits]
         elif self.action == 'list':
-            permission_classes = [IsAuthenticated, CanViewAgentSchedule]
+            permission_classes = [IsAuthenticated]
         else:
             permission_classes = [IsAuthenticated]
         
@@ -290,16 +295,21 @@ class VisitScheduleViewSet(viewsets.ModelViewSet):
             'client', 'agent', 'property', 'reservation'
         )
         
-        if self.request.user.is_superuser:
+        user = self.request.user
+        
+        if user.is_superuser:
             return queryset
         
         # Les agents voient leurs propres planifications
-        if hasattr(self.request.user, 'profile'):
-            if self.request.user.profile.role in ['agent', 'manager', 'admin']:
-                return queryset.filter(agent=self.request.user)
+        try:
+            if hasattr(user, 'profile') and user.profile:
+                if user.profile.role in ['agent', 'manager', 'admin']:
+                    return queryset.filter(agent=user)
+        except AttributeError:
+            pass
         
         # Les clients voient leurs propres planifications
-        return queryset.filter(client=self.request.user)
+        return queryset.filter(Q(client=user) | Q(agent=user))
     
     def perform_create(self, serializer):
         """Crée une nouvelle planification"""
@@ -458,21 +468,28 @@ class CalendarConflictViewSet(viewsets.ReadOnlyModelViewSet):
     
     def get_queryset(self):
         """Retourne les conflits selon les permissions"""
-        if self.request.user.is_superuser:
+        user = self.request.user
+        
+        if user.is_superuser:
             return CalendarConflict.objects.all().select_related('schedule1', 'schedule2')
         
         # Les agents voient les conflits de leurs planifications
-        if hasattr(self.request.user, 'profile'):
-            if self.request.user.profile.role in ['agent', 'manager', 'admin']:
-                return CalendarConflict.objects.filter(
-                    Q(schedule1__agent=self.request.user) |
-                    Q(schedule2__agent=self.request.user)
-                ).select_related('schedule1', 'schedule2')
+        try:
+            if hasattr(user, 'profile') and user.profile:
+                if user.profile.role in ['agent', 'manager', 'admin']:
+                    return CalendarConflict.objects.filter(
+                        Q(schedule1__agent=user) |
+                        Q(schedule2__agent=user)
+                    ).select_related('schedule1', 'schedule2')
+        except AttributeError:
+            pass
         
         # Les clients voient les conflits de leurs planifications
         return CalendarConflict.objects.filter(
-            Q(schedule1__client=self.request.user) |
-            Q(schedule2__client=self.request.user)
+            Q(schedule1__client=user) |
+            Q(schedule2__client=user) |
+            Q(schedule1__agent=user) |
+            Q(schedule2__agent=user)
         ).select_related('schedule1', 'schedule2')
     
     @action(detail=True, methods=['post'])
@@ -537,15 +554,21 @@ class ScheduleMetricsViewSet(viewsets.ReadOnlyModelViewSet):
     
     def get_queryset(self):
         """Retourne les métriques selon les permissions"""
-        if self.request.user.is_superuser:
+        user = self.request.user
+        
+        if user.is_superuser:
             return ScheduleMetrics.objects.all().select_related('agent')
         
         # Les agents voient leurs propres métriques
-        if hasattr(self.request.user, 'profile'):
-            if self.request.user.profile.role in ['agent', 'manager', 'admin']:
-                return ScheduleMetrics.objects.filter(agent=self.request.user).select_related('agent')
+        try:
+            if hasattr(user, 'profile') and user.profile:
+                if user.profile.role in ['agent', 'manager', 'admin']:
+                    return ScheduleMetrics.objects.filter(agent=user).select_related('agent')
+        except AttributeError:
+            pass
         
-        return ScheduleMetrics.objects.none()
+        # Par défaut, essayer de voir ses propres métriques
+        return ScheduleMetrics.objects.filter(agent=user).select_related('agent')
     
     @action(detail=False, methods=['get'])
     def my_metrics(self, request):
@@ -687,8 +710,9 @@ def calendar_view(request):
             
             if agent_id:
                 query = query.filter(agent_id=agent_id)
-            elif not request.user.is_superuser:
-                query = query.filter(agent=request.user)
+            elif request.user.is_authenticated and not request.user.is_superuser:
+                # Utilisateur voit ses planifications (comme client ou agent)
+                query = query.filter(Q(agent=request.user) | Q(client=request.user))
             
             schedules = query.select_related('client', 'agent', 'property').order_by('scheduled_date', 'scheduled_start_time')
             

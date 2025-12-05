@@ -55,6 +55,16 @@ class Property(models.Model):
         ],
         default='draft'
     )
+    #  Vente' : '📅 Location'
+    property_type_display = models.CharField(
+        max_length=20,
+        choices=[
+            ('sale', 'Vente'),
+            ('rent', 'Location'),
+        ],
+        default='sale'
+    )
+    
     
     # Location
     address_line1 = models.CharField(max_length=200)
@@ -160,17 +170,87 @@ class Property(models.Model):
         blank=True
     )
     
-    # Features
-    has_balcony = models.BooleanField(default=False)
-    has_terrace = models.BooleanField(default=False)
-    has_garden = models.BooleanField(default=False)
-    has_garage = models.BooleanField(default=False)
-    has_parking = models.BooleanField(default=False)
-    has_elevator = models.BooleanField(default=False)
-    has_fireplace = models.BooleanField(default=False)
-    has_pool = models.BooleanField(default=False)
-    has_air_conditioning = models.BooleanField(default=False)
-    has_security_system = models.BooleanField(default=False)
+    # Features - Basic
+    has_balcony = models.BooleanField(default=False, verbose_name='Balcon')
+    has_terrace = models.BooleanField(default=False, verbose_name='Terrasse')
+    has_garden = models.BooleanField(default=False, verbose_name='Jardin')
+    has_garage = models.BooleanField(default=False, verbose_name='Garage')
+    has_parking = models.BooleanField(default=False, verbose_name='Parking')
+    has_elevator = models.BooleanField(default=False, verbose_name='Ascenseur')
+    has_fireplace = models.BooleanField(default=False, verbose_name='Cheminée')
+    has_pool = models.BooleanField(default=False, verbose_name='Piscine')
+    has_air_conditioning = models.BooleanField(default=False, verbose_name='Climatisation')
+    has_security_system = models.BooleanField(default=False, verbose_name='Système de sécurité')
+    
+    # Features - Bathroom (Salle de bain)
+    has_bathtub = models.BooleanField(default=False, verbose_name='Baignoire')
+    has_outdoor_shower = models.BooleanField(default=False, verbose_name='Douche extérieure')
+    has_hot_water = models.BooleanField(default=True, verbose_name='Eau chaude')
+    
+    # Features - Bedroom & Laundry (Chambre et linge)
+    has_washing_machine = models.BooleanField(default=False, verbose_name='Lave-linge')
+    has_dryer = models.BooleanField(default=False, verbose_name='Sèche-linge')
+    has_essentials = models.BooleanField(default=False, verbose_name='Serviettes, draps, savon et papier toilette')
+    has_hangers = models.BooleanField(default=False, verbose_name='Cintres')
+    has_sheets = models.BooleanField(default=False, verbose_name='Draps')
+    has_extra_pillows_blankets = models.BooleanField(default=False, verbose_name='Oreillers et couvertures supplémentaires')
+    has_blinds = models.BooleanField(default=False, verbose_name='Stores')
+    has_iron = models.BooleanField(default=False, verbose_name='Fer à repasser')
+    has_clothes_rack = models.BooleanField(default=False, verbose_name='Étendoir à linge')
+    has_clothes_storage = models.BooleanField(default=False, verbose_name='Espace de rangement pour les vêtements')
+    
+    # Features - Entertainment (Divertissement)
+    has_tv = models.BooleanField(default=False, verbose_name='Télévision')
+    
+    # Features - Family (Famille)
+    has_baby_crib = models.BooleanField(default=False, verbose_name='Lit pour bébé')
+    has_children_playroom = models.BooleanField(default=False, verbose_name='Salle de jeux pour enfants')
+    
+    # Features - Heating & Cooling (Chauffage et climatisation)
+    has_portable_fans = models.BooleanField(default=False, verbose_name='Ventilateurs portables')
+    has_heating = models.BooleanField(default=False, verbose_name='Chauffage')
+    
+    # Features - Security (Sécurité à la maison)
+    has_outdoor_security_cameras = models.BooleanField(default=False, verbose_name='Caméras de surveillance extérieures')
+    has_security_cameras = models.BooleanField(default=False, verbose_name='Présence de caméras à l\'extérieur')
+    has_smoke_detector = models.BooleanField(default=False, verbose_name='Détecteur de fumée')
+    has_carbon_monoxide_detector = models.BooleanField(default=False, verbose_name='Détecteur de monoxyde de carbone')
+    
+    # Features - Internet & Office (Internet et bureau)
+    has_wifi = models.BooleanField(default=False, verbose_name='WiFi')
+    has_portable_wifi = models.BooleanField(default=False, verbose_name='Wi-Fi portable')
+    
+    # Features - Kitchen & Dining (Cuisine et salle à manger)
+    has_kitchen = models.BooleanField(default=False, verbose_name='Cuisine')
+    has_refrigerator = models.BooleanField(default=False, verbose_name='Réfrigérateur')
+    has_microwave = models.BooleanField(default=False, verbose_name='Four à micro-ondes')
+    has_basic_kitchen_equipment = models.BooleanField(default=False, verbose_name='Équipements de cuisine de base')
+    has_dishes_utensils = models.BooleanField(default=False, verbose_name='Vaisselle et couverts')
+    has_freezer = models.BooleanField(default=False, verbose_name='Congélateur')
+    has_dishwasher = models.BooleanField(default=False, verbose_name='Lave-vaisselle')
+    has_stove = models.BooleanField(default=False, verbose_name='Cuisinière')
+    has_oven = models.BooleanField(default=False, verbose_name='Four')
+    has_coffee_maker = models.BooleanField(default=False, verbose_name='Cafetière')
+    has_blender = models.BooleanField(default=False, verbose_name='Blender')
+    has_dining_table = models.BooleanField(default=False, verbose_name='Table à manger')
+    
+    # Features - Outdoor (Extérieur)
+    has_backyard = models.BooleanField(default=False, verbose_name='Arrière-cour')
+    has_outdoor_furniture = models.BooleanField(default=False, verbose_name='Mobilier d\'extérieur')
+    has_outdoor_dining_space = models.BooleanField(default=False, verbose_name='Espace repas en plein air')
+    has_outdoor_kitchen = models.BooleanField(default=False, verbose_name='Cuisine extérieure')
+    has_lounge_chairs = models.BooleanField(default=False, verbose_name='Chaises longues')
+    
+    # Features - Parking & Facilities (Parking et installations)
+    has_free_parking_on_premises = models.BooleanField(default=False, verbose_name='Parking gratuit sur place')
+    has_free_street_parking = models.BooleanField(default=False, verbose_name='Parking gratuit dans la rue')
+    has_year_round_pool = models.BooleanField(default=False, verbose_name='Piscine privée disponible toute l\'année')
+    
+    # Features - Services (Services)
+    has_luggage_dropoff_allowed = models.BooleanField(default=False, verbose_name='Dépôt de bagages autorisé')
+    has_long_term_stays_allowed = models.BooleanField(default=False, verbose_name='Séjours longue durée autorisés')
+    has_cleaning_during_stay = models.BooleanField(default=False, verbose_name='Ménage disponible pendant le séjour')
+    has_key_exchange_by_host = models.BooleanField(default=False, verbose_name='Clés remises par l\'hôte')
     
     # Furnishing
     furnished = models.BooleanField(default=False)

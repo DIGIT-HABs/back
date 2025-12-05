@@ -63,9 +63,44 @@ class PropertyAdmin(admin.ModelAdmin):
         ('Énergie et environnement', {
             'fields': ('energy_class', 'ges_class', 'heating_type')
         }),
-        ('Équipements', {
+        ('Équipements de base', {
             'fields': ('has_balcony', 'has_terrace', 'has_garden', 'has_garage', 'has_parking', 
                       'has_elevator', 'has_fireplace', 'has_pool', 'has_air_conditioning', 'has_security_system')
+        }),
+        ('Salle de bain', {
+            'fields': ('has_bathtub', 'has_outdoor_shower', 'has_hot_water')
+        }),
+        ('Chambre et linge', {
+            'fields': ('has_washing_machine', 'has_dryer', 'has_essentials', 'has_hangers', 'has_sheets',
+                      'has_extra_pillows_blankets', 'has_blinds', 'has_iron', 'has_clothes_rack', 'has_clothes_storage')
+        }),
+        ('Divertissement et famille', {
+            'fields': ('has_tv', 'has_baby_crib', 'has_children_playroom')
+        }),
+        ('Chauffage et climatisation', {
+            'fields': ('has_portable_fans', 'has_heating')
+        }),
+        ('Sécurité à la maison', {
+            'fields': ('has_outdoor_security_cameras', 'has_security_cameras', 'has_smoke_detector', 'has_carbon_monoxide_detector')
+        }),
+        ('Internet et bureau', {
+            'fields': ('has_wifi', 'has_portable_wifi')
+        }),
+        ('Cuisine et salle à manger', {
+            'fields': ('has_kitchen', 'has_refrigerator', 'has_microwave', 'has_basic_kitchen_equipment',
+                      'has_dishes_utensils', 'has_freezer', 'has_dishwasher', 'has_stove', 'has_oven',
+                      'has_coffee_maker', 'has_blender', 'has_dining_table')
+        }),
+        ('Extérieur', {
+            'fields': ('has_backyard', 'has_outdoor_furniture', 'has_outdoor_dining_space',
+                      'has_outdoor_kitchen', 'has_lounge_chairs')
+        }),
+        ('Parking et installations', {
+            'fields': ('has_free_parking_on_premises', 'has_free_street_parking', 'has_year_round_pool')
+        }),
+        ('Services', {
+            'fields': ('has_luggage_dropoff_allowed', 'has_long_term_stays_allowed',
+                      'has_cleaning_during_stay', 'has_key_exchange_by_host')
         }),
         ('Ameublement', {
             'fields': ('furnished', 'furnished_level')

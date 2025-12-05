@@ -62,6 +62,9 @@ class PropertyViewSet(viewsets.ModelViewSet):
             permission_classes = [permissions.IsAuthenticated, IsPropertyAgentOrOwner]
         elif self.action in ['create_visit', 'my_visits']:
             permission_classes = [permissions.IsAuthenticated]
+        elif self.action in ['categories', 'featured', 'search', 'list', 'retrieve']:
+            # Endpoints publics - lecture sans authentification (IsAuthenticatedOrReadOnly)
+            permission_classes = [permissions.AllowAny]
         else:
             permission_classes = [permissions.IsAuthenticated, CanViewProperty]
         
@@ -73,7 +76,12 @@ class PropertyViewSet(viewsets.ModelViewSet):
         
         user = self.request.user
         
-        # Filter based on user role
+        # Check if user is authenticated first
+        if not user.is_authenticated:
+            # Anonymous users: only see available and public properties
+            return queryset.filter(status='available', is_public=True)
+        
+        # Filter based on user role (authenticated users only)
         if user.role == 'client':
             # Clients can only see available and public properties
             queryset = queryset.filter(status='available', is_public=True)
@@ -87,7 +95,7 @@ class PropertyViewSet(viewsets.ModelViewSet):
             # Admin can see all properties
             pass
         else:
-            # Unauthenticated or unknown role: only public available properties
+            # Unknown role: only public available properties
             queryset = queryset.filter(status='available', is_public=True)
         
         # Apply additional filters from query parameters
@@ -500,6 +508,69 @@ class PropertyViewSet(viewsets.ModelViewSet):
         cache.set(cache_key, stats, 600)
         
         return Response(stats)
+    
+    @action(detail=False, methods=['get'], permission_classes=[permissions.AllowAny])
+    def categories(self, request):
+        """Get property categories with counts for filters (public endpoint)."""
+        # Check cache first
+        cache_key = 'property_categories_public'
+        cached_categories = cache.get(cache_key)
+        if cached_categories:
+            return Response(cached_categories)
+        
+        # Only count available and public properties for public stats
+        queryset = Property.objects.filter(status='available', is_public=True)
+        
+        # Get total count
+        total_count = queryset.count()
+        
+        # Get counts by property type
+        property_types_counts = dict(
+            queryset.values('property_type')
+            .annotate(count=Count('id'))
+            .values_list('property_type', 'count')
+        )
+        
+        # Property type labels mapping with emojis
+        property_type_labels = {
+            'apartment': {'label': 'Appartements', 'icon': '🏢'},
+            'house': {'label': 'Maisons', 'icon': '🏠'},
+            'villa': {'label': 'Villas', 'icon': '🏡'},
+            'penthouse': {'label': 'Penthouses', 'icon': '🏙️'},
+            'loft': {'label': 'Lofts', 'icon': '🏗️'},
+            'duplex': {'label': 'Duplex', 'icon': '🏘️'},
+            'triplex': {'label': 'Triplex', 'icon': '🏘️'},
+            'studio': {'label': 'Studios', 'icon': '🛏️'},
+            'commercial': {'label': 'Commerces', 'icon': '🏪'},
+            'office': {'label': 'Bureaux', 'icon': '💼'},
+            'land': {'label': 'Terrains', 'icon': '🌳'},
+            'parking': {'label': 'Parkings', 'icon': '🅿️'},
+            'cellar': {'label': 'Caves', 'icon': '📦'},
+            'garage': {'label': 'Garages', 'icon': '🚗'},
+        }
+        
+        # Build categories array
+        categories = [{
+            'id': 'all',
+            'label': 'Tous',
+            'icon': '🏠',
+            'count': total_count
+        }]
+        
+        # Add categories with counts > 0, sorted by count descending
+        for property_type, count in sorted(property_types_counts.items(), key=lambda x: x[1], reverse=True):
+            if count > 0 and property_type in property_type_labels:
+                categories.append({
+                    'id': property_type,
+                    'label': property_type_labels[property_type]['label'],
+                    'icon': property_type_labels[property_type]['icon'],
+                    'count': count
+                })
+        
+        # Cache for 15 minutes
+        cache.set(cache_key, categories, 900)
+        
+        return Response(categories)
 
 
 class PropertyImageViewSet(viewsets.ModelViewSet):
