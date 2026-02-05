@@ -1,211 +1,111 @@
-# 🚀 Déploiement Multi-Projets sur le Même VPS
+# 🌐 Déploiement Multi-Projets sur VPS
 
-**Situation** : Vous avez déjà `al-toppe` en production sur `/var/www/al-toppe`  
-**Objectif** : Déployer DIGIT-HAB CRM à côté sans conflit
+**Situation** : Vous avez déjà **al-toppe** en production et vous voulez ajouter **DIGIT-HAB CRM**
+
+**Domaines** :
+- Projet existant : `altoppe.sn` 
+- Nouveau projet : `api.digit-hab.altoppe.sn`, `digit-hab.altoppe.sn`
 
 ---
 
-## 📋 Architecture Multi-Projets
+## 📊 Architecture Actuelle
 
 ```
-VPS
-├── /var/www/al-toppe/          (Projet existant)
-│   ├── docker-compose.yml
-│   ├── nginx (port 80, 443)
-│   ├── PostgreSQL (port interne)
-│   └── Redis (port interne)
+VPS (Ubuntu)
 │
-└── /var/www/digit-hab-crm/     (Nouveau projet)
-    ├── docker-compose.yml
-    ├── nginx (ports différents ou domaine différent)
-    ├── PostgreSQL (port interne)
-    └── Redis (port interne)
+├── /var/www/al-toppe/               ← Projet existant
+│   └── (Django sur port 8000)
+│
+├── Nginx Principal (Host)
+│   ├── Port 80
+│   └── Port 443 → altoppe.sn
+│
+└── Certificats SSL
+    └── /etc/letsencrypt/live/altoppe.sn/
+```
+
+## 🎯 Architecture Cible
+
+```
+VPS (Ubuntu)
+│
+├── /var/www/al-toppe/               ← Projet 1
+│   └── Docker Compose (port 8000)
+│
+├── /var/www/digit-hab-crm/          ← Projet 2 (NOUVEAU)
+│   └── Docker Compose (port 8001)
+│
+├── Nginx Principal (Host)
+│   ├── Port 80  → Redirection HTTPS
+│   └── Port 443 →
+│       ├── altoppe.sn → :8000 (al-toppe)
+│       └── digit-hab.altoppe.sn → :8001 (digit-hab)
+│
+└── Certificats SSL
+    ├── /etc/letsencrypt/live/altoppe.sn/
+    └── /etc/letsencrypt/live/digit-hab.altoppe.sn/  ← NOUVEAU
 ```
 
 ---
 
-## 🎯 Option 1 : Domaines Séparés (RECOMMANDÉ)
+## 🚀 Guide de Déploiement Étape par Étape
 
-Chaque projet a son propre domaine/sous-domaine.
+### ÉTAPE 1 : Obtenir les Certificats SSL
 
-### Configuration
-
-**Al-Toppe** : `al-toppe.com`, `api.al-toppe.com`  
-**DIGIT-HAB** : `digit-hab.com`, `api.digit-hab.com`
-
-### Avantages
-- ✅ Isolation complète
-- ✅ Pas de conflit de ports
-- ✅ Nginx géré indépendamment
-- ✅ Plus simple à maintenir
-
----
-
-## 🔧 Déploiement Étape par Étape
-
-### Étape 1 : Préparer le Dossier
+Puisque Nginx tourne déjà, utilisez le plugin nginx :
 
 ```bash
-# Se connecter au VPS
-ssh digit-hab@VOTRE_IP
+# Méthode 1 : Plugin Nginx (RECOMMANDÉ)
+sudo certbot certonly --nginx \
+  -d digit-hab.altoppe.sn \
+  -d api.digit-hab.altoppe.sn \
+  --email souleymane9700@gmail.com \
+  --agree-tos
 
-# Créer le dossier pour DIGIT-HAB CRM
+# OU Méthode 2 : Webroot
+# sudo certbot certonly --webroot \
+#   -w /var/www/certbot \
+#   -d digit-hab.altoppe.sn \
+#   -d api.digit-hab.altoppe.sn \
+#   --email souleymane9700@gmail.com \
+#   --agree-tos
+
+# Vérifier les certificats
+sudo ls -la /etc/letsencrypt/live/digit-hab.altoppe.sn/
+```
+
+### ÉTAPE 2 : Préparer les Dossiers
+
+```bash
+# Créer le dossier du projet
 sudo mkdir -p /var/www/digit-hab-crm
-sudo chown digit-hab:digit-hab /var/www/digit-hab-crm
-cd /var/www/digit-hab-crm
+sudo chown -R digit-hab:digit-hab /var/www/digit-hab-crm
+
+# Créer les dossiers nécessaires
+mkdir -p /var/www/digit-hab-crm/staticfiles
+mkdir -p /var/www/digit-hab-crm/media
+mkdir -p /var/www/digit-hab-crm/logs
 ```
 
-### Étape 2 : Transférer les Fichiers
+### ÉTAPE 3 : Transférer le Projet
 
-**Depuis votre machine locale** :
+**Sur votre machine locale** :
 
 ```bash
-# Aller dans votre projet local
+# Aller dans le dossier Django
 cd c:/Users/soule/Documents/projet/2025/DIGIT-HAB_CRM_/CRM/Django
 
 # Transférer via SCP
-scp -r ./* digit-hab@VOTRE_IP:/var/www/digit-hab-crm/
+scp -r . digit-hab@VOTRE_IP_VPS:/var/www/digit-hab-crm/
 
-# Ou via rsync (plus rapide pour les mises à jour)
-rsync -avz --exclude='venv' --exclude='__pycache__' --exclude='*.pyc' \
-  ./* digit-hab@VOTRE_IP:/var/www/digit-hab-crm/
+# OU via rsync (plus rapide pour les updates)
+rsync -avz --exclude 'venv' --exclude '__pycache__' --exclude '*.pyc' \
+  . digit-hab@VOTRE_IP_VPS:/var/www/digit-hab-crm/
 ```
 
-**Ou via Git** :
+### ÉTAPE 4 : Configurer les Variables d'Environnement
 
-```bash
-# Sur le VPS
-cd /var/www/digit-hab-crm
-git clone https://github.com/VOTRE_USERNAME/DIGIT-HAB_CRM.git .
-```
-
-### Étape 3 : Modifier le docker-compose.yml pour Éviter les Conflits
-
-Créez un fichier `docker-compose.prod.yml` :
-
-```yaml
-version: '3.8'
-
-services:
-  db:
-    image: postgres:15-alpine
-    container_name: digit-hab-db  # ⚠️ Nom unique
-    environment:
-      POSTGRES_DB: ${DB_NAME:-digit_hab_crm_prod}
-      POSTGRES_USER: ${DB_USER:-digit_hab_user}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-    volumes:
-      - digit_hab_postgres_data:/var/lib/postgresql/data  # ⚠️ Volume unique
-    networks:
-      - digit-hab-network  # ⚠️ Network unique
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    container_name: digit-hab-redis  # ⚠️ Nom unique
-    command: redis-server --requirepass ${REDIS_PASSWORD}
-    volumes:
-      - digit_hab_redis_data:/data  # ⚠️ Volume unique
-    networks:
-      - digit-hab-network
-    restart: unless-stopped
-
-  web:
-    build: .
-    container_name: digit-hab-web  # ⚠️ Nom unique
-    environment:
-      - DEBUG=False
-      - SECRET_KEY=${SECRET_KEY}
-      - DB_NAME=${DB_NAME:-digit_hab_crm_prod}
-      - DB_USER=${DB_USER:-digit_hab_user}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=db
-      - DB_PORT=5432
-      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
-    volumes:
-      - ./staticfiles:/var/www/digit-hab/staticfiles
-      - ./media:/var/www/digit-hab/media
-    networks:
-      - digit-hab-network
-    restart: unless-stopped
-    command: >
-      sh -c "python manage.py migrate &&
-             python manage.py collectstatic --noinput &&
-             gunicorn --bind 0.0.0.0:8000 --workers 4 digit_hab_crm.wsgi:application"
-
-  celery-worker:
-    build: .
-    container_name: digit-hab-celery-worker  # ⚠️ Nom unique
-    environment:
-      - DEBUG=False
-      - SECRET_KEY=${SECRET_KEY}
-      - DB_NAME=${DB_NAME:-digit_hab_crm_prod}
-      - DB_USER=${DB_USER:-digit_hab_user}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=db
-      - DB_PORT=5432
-      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/0
-    volumes:
-      - ./media:/app/media
-    networks:
-      - digit-hab-network
-    restart: unless-stopped
-    depends_on:
-      - db
-      - redis
-    command: python -m celery -A digit_hab_crm worker --loglevel=info
-
-  celery-beat:
-    build: .
-    container_name: digit-hab-celery-beat  # ⚠️ Nom unique
-    environment:
-      - DEBUG=False
-      - SECRET_KEY=${SECRET_KEY}
-      - DB_NAME=${DB_NAME:-digit_hab_crm_prod}
-      - DB_USER=${DB_USER:-digit_hab_user}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=db
-      - DB_PORT=5432
-      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/0
-    networks:
-      - digit-hab-network
-    restart: unless-stopped
-    depends_on:
-      - db
-      - redis
-      - celery-worker
-    command: python -m celery -A digit_hab_crm beat --loglevel=info
-
-  nginx:
-    image: nginx:alpine
-    container_name: digit-hab-nginx  # ⚠️ Nom unique
-    ports:
-      - "8080:80"      # ⚠️ Port différent de al-toppe (80 → 8080)
-      - "8443:443"     # ⚠️ Port différent de al-toppe (443 → 8443)
-    volumes:
-      - ./nginx.prod.conf:/etc/nginx/nginx.conf:ro
-      - ./staticfiles:/var/www/digit-hab/staticfiles:ro
-      - ./media:/var/www/digit-hab/media:ro
-      - ./ssl:/etc/nginx/ssl:ro
-    depends_on:
-      - web
-    networks:
-      - digit-hab-network
-    restart: unless-stopped
-
-volumes:
-  digit_hab_postgres_data:  # ⚠️ Nom unique
-  digit_hab_redis_data:     # ⚠️ Nom unique
-
-networks:
-  digit-hab-network:        # ⚠️ Nom unique
-    driver: bridge
-```
-
-### Étape 4 : Configurer l'Environnement
+**Sur le VPS** :
 
 ```bash
 cd /var/www/digit-hab-crm
@@ -214,132 +114,124 @@ cd /var/www/digit-hab-crm
 nano .env
 ```
 
-Contenu du `.env` :
+**Contenu du `.env`** :
 
 ```bash
-# Django Core
+# ============================================
+# DIGIT-HAB CRM - Production
+# ============================================
+
+# Django
 DEBUG=False
-SECRET_KEY=VOTRE_SECRET_KEY_UNIQUE_DIFFERENTE_DE_AL_TOPPE
-ALLOWED_HOSTS=digit-hab.com,api.digit-hab.com,www.digit-hab.com,VOTRE_IP
+SECRET_KEY=CHANGEZ_MOI_$(openssl rand -base64 50)
+ALLOWED_HOSTS=digit-hab.altoppe.sn,api.digit-hab.altoppe.sn,VOTRE_IP_VPS
 
 # Database
+DB_ENGINE=django.db.backends.postgresql
 DB_NAME=digit_hab_crm_prod
 DB_USER=digit_hab_user
-DB_PASSWORD=VOTRE_MOT_DE_PASSE_POSTGRES_UNIQUE
+DB_PASSWORD=CHANGEZ_MOI_PASSWORD_POSTGRES_123
 DB_HOST=db
 DB_PORT=5432
 
 # Redis
-REDIS_PASSWORD=VOTRE_MOT_DE_PASSE_REDIS_UNIQUE
-REDIS_URL=redis://:VOTRE_MOT_DE_PASSE_REDIS_UNIQUE@redis:6379/0
+REDIS_PASSWORD=CHANGEZ_MOI_PASSWORD_REDIS_456
+REDIS_URL=redis://:CHANGEZ_MOI_PASSWORD_REDIS_456@redis:6379/0
 
 # Celery
-CELERY_BROKER_URL=redis://:VOTRE_MOT_DE_PASSE_REDIS_UNIQUE@redis:6379/0
-CELERY_RESULT_BACKEND=redis://:VOTRE_MOT_DE_PASSE_REDIS_UNIQUE@redis:6379/0
+CELERY_BROKER_URL=redis://:CHANGEZ_MOI_PASSWORD_REDIS_456@redis:6379/0
+CELERY_RESULT_BACKEND=redis://:CHANGEZ_MOI_PASSWORD_REDIS_456@redis:6379/0
 
-# Email (utilisez les mêmes si c'est le même compte)
+# Email
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
 EMAIL_HOST=smtp.gmail.com
 EMAIL_PORT=587
 EMAIL_USE_TLS=True
-EMAIL_HOST_USER=votre_email@gmail.com
-EMAIL_HOST_PASSWORD=votre_app_password
+EMAIL_HOST_USER=souleymane9700@gmail.com
+EMAIL_HOST_PASSWORD=aknr icmy elir eccj
 
-# Cloudinary (créez un nouveau projet ou partagez)
-CLOUDINARY_CLOUD_NAME=votre_cloud_name
-CLOUDINARY_API_KEY=votre_api_key
-CLOUDINARY_API_SECRET=votre_api_secret
+# Cloudinary
+CLOUDINARY_CLOUD_NAME=dxjmr9een
+CLOUDINARY_API_KEY=787852268875218
+CLOUDINARY_API_SECRET=6LstMR8csQDQVeFcFdYZXxRlwow
 
-# Stripe (créez un nouveau compte ou partagez)
-STRIPE_PUBLISHABLE_KEY=pk_live_...
-STRIPE_SECRET_KEY=sk_live_...
-STRIPE_WEBHOOK_SECRET=whsec_...
+# Stripe
+STRIPE_PUBLISHABLE_KEY=pk_test_51Opr31I9ZCLc3CRBzCBXOXZpCQVprlz5pdTBNFQ3npDtljGhVLYIrS1XP7UU0dEBxvZLQi4JXHGG8imuStxmwYfB00nsAPigUa
+STRIPE_SECRET_KEY=sk_test_51Opr31I9ZCLc3CRBj6e5MW4LzxLJat0MgmGPg9gvfZldVZ8TIiW0bwrIzJkcX9f2xrLs7W0Q3ELxqx8jOEZvnRoc00sv8jlMhL
+STRIPE_WEBHOOK_SECRET=whsec_2d33dd5cc8e0dcc55f1fd43c908e31fb5de3e2c97b1beb9c24954b42063d9c5d
+STRIPE_CURRENCY=xof
 
 # CORS
-CORS_ALLOWED_ORIGINS=https://digit-hab.com,https://app.digit-hab.com
+CORS_ALLOWED_ORIGINS=https://digit-hab.altoppe.sn,https://api.digit-hab.altoppe.sn
+
+# Security
+SECURE_SSL_REDIRECT=True
+SECURE_PROXY_SSL_HEADER=HTTP_X_FORWARDED_PROTO,https
+SESSION_COOKIE_SECURE=True
+CSRF_COOKIE_SECURE=True
 ```
 
-### Étape 5 : Générer les Certificats SSL
+### ÉTAPE 5 : Configurer Nginx Principal
 
-**Option A : Let's Encrypt (si domaine configuré)**
+**Sur le VPS** :
 
 ```bash
-# Arrêter temporairement al-toppe nginx pour libérer le port 80
-cd /var/www/al-toppe
-docker compose stop nginx
-
-# Obtenir le certificat pour digit-hab
-sudo certbot certonly --standalone \
-  -d digit-hab.com \
-  -d www.digit-hab.com \
-  -d api.digit-hab.com \
-  --email votre_email@gmail.com \
-  --agree-tos
-
-# Copier les certificats
-sudo mkdir -p /var/www/digit-hab-crm/ssl
-sudo cp /etc/letsencrypt/live/digit-hab.com/fullchain.pem /var/www/digit-hab-crm/ssl/
-sudo cp /etc/letsencrypt/live/digit-hab.com/privkey.pem /var/www/digit-hab-crm/ssl/
-sudo chown -R digit-hab:digit-hab /var/www/digit-hab-crm/ssl
-
-# Redémarrer al-toppe nginx
-cd /var/www/al-toppe
-docker compose start nginx
+# Créer le fichier de configuration
+sudo nano /etc/nginx/sites-available/digit-hab
 ```
 
-**Option B : Certificat Auto-Signé (développement)**
+Copiez le contenu de `nginx-site.conf` (que j'ai créé ci-dessus).
 
 ```bash
-cd /var/www/digit-hab-crm
-mkdir -p ssl
-openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout ssl/privkey.pem \
-  -out ssl/fullchain.pem \
-  -subj "/C=SN/ST=Dakar/L=Dakar/O=DigitHab/CN=digit-hab.com"
+# Créer un lien symbolique
+sudo ln -s /etc/nginx/sites-available/digit-hab /etc/nginx/sites-enabled/
+
+# Tester la configuration
+sudo nginx -t
+
+# Si OK, recharger Nginx
+sudo systemctl reload nginx
 ```
 
-### Étape 6 : Modifier nginx.conf
+### ÉTAPE 6 : Ajouter Rate Limiting dans Nginx Principal
 
 ```bash
-cd /var/www/digit-hab-crm
-cp nginx.conf nginx.prod.conf
-nano nginx.prod.conf
+# Éditer la configuration principale
+sudo nano /etc/nginx/nginx.conf
 ```
 
-Assurez-vous que les chemins sont corrects :
+Ajouter dans le bloc `http` (s'il n'existe pas déjà) :
 
 ```nginx
-# Static files
-location /static/ {
-    alias /var/www/digit-hab/staticfiles/;  # ⚠️ Vérifier le chemin
-    expires 30d;
-}
-
-location /media/ {
-    alias /var/www/digit-hab/media/;  # ⚠️ Vérifier le chemin
-    expires 30d;
+http {
+    # ... autres configurations ...
+    
+    # Rate limiting zones
+    limit_req_zone $binary_remote_addr zone=api:10m rate=10r/s;
+    limit_req_zone $binary_remote_addr zone=login:10m rate=5r/m;
+    
+    # ... reste de la configuration ...
 }
 ```
 
-### Étape 7 : Build et Démarrer
+### ÉTAPE 7 : Déployer l'Application
 
 ```bash
 cd /var/www/digit-hab-crm
 
-# Build les images
+# Build les images Docker
 docker compose -f docker-compose.prod.yml build
 
-# Démarrer les services
+# Démarrer tous les services
 docker compose -f docker-compose.prod.yml up -d
 
 # Voir les logs
 docker compose -f docker-compose.prod.yml logs -f
 ```
 
-### Étape 8 : Migrations et Setup
+### ÉTAPE 8 : Setup Initial de la Base de Données
 
 ```bash
-cd /var/www/digit-hab-crm
-
 # Migrations
 docker compose -f docker-compose.prod.yml exec web python manage.py migrate
 
@@ -348,211 +240,386 @@ docker compose -f docker-compose.prod.yml exec web python manage.py createsuperu
 
 # Collecter les statiques
 docker compose -f docker-compose.prod.yml exec web python manage.py collectstatic --noinput
+
+# Créer l'agence et des données de test
+docker compose -f docker-compose.prod.yml exec web python create_clients.py
 ```
 
-### Étape 9 : Vérifier que Tout Fonctionne
+### ÉTAPE 9 : Vérifier le Déploiement
 
 ```bash
 # Vérifier les conteneurs
-docker ps
+docker compose -f docker-compose.prod.yml ps
 
-# Vous devriez voir :
-# - al-toppe-db, al-toppe-redis, al-toppe-web, al-toppe-nginx
-# - digit-hab-db, digit-hab-redis, digit-hab-web, digit-hab-nginx
+# Tester les endpoints
+curl http://localhost:8001/health/
+curl https://digit-hab.altoppe.sn/health/
+curl https://api.digit-hab.altoppe.sn/api/
 
-# Tester l'accès
-curl http://localhost:8080/health/
-curl https://digit-hab.com/health/  # Si domaine configuré
+# Tester l'admin
+# Ouvrir dans le navigateur : https://digit-hab.altoppe.sn/admin/
 ```
 
 ---
 
-## 🌐 Option 2 : Nginx Reverse Proxy Global (Avancé)
+## 🔒 Configuration SSL - Détails
 
-Si vous voulez que les deux projets utilisent les ports 80 et 443, configurez un nginx global.
-
-### Architecture
-
-```
-Internet → Nginx Global (80, 443)
-            ↓
-            ├─→ al-toppe.com → al-toppe-web:8000
-            └─→ digit-hab.com → digit-hab-web:8000
-```
-
-### Configuration
-
-1. **Désactiver les nginx internes** dans les docker-compose
-2. **Installer nginx globalement** sur le VPS
-3. **Configurer les virtual hosts**
+### Obtenir les Certificats avec Nginx en Marche
 
 ```bash
-# Installer nginx sur le VPS
-sudo apt install nginx
+# Option A : Plugin Nginx (plus simple)
+sudo certbot certonly --nginx \
+  -d digit-hab.altoppe.sn \
+  -d api.digit-hab.altoppe.sn
 
-# Créer la config pour digit-hab
-sudo nano /etc/nginx/sites-available/digit-hab.com
+# Option B : Webroot
+# 1. Créer le dossier webroot
+sudo mkdir -p /var/www/certbot
+
+# 2. Ajouter dans votre config Nginx temporairement
+sudo nano /etc/nginx/sites-available/digit-hab-temp
+
+# Contenu :
+# server {
+#     listen 80;
+#     server_name digit-hab.altoppe.sn api.digit-hab.altoppe.sn;
+#     location /.well-known/acme-challenge/ {
+#         root /var/www/certbot;
+#     }
+# }
+
+# 3. Activer et recharger
+sudo ln -s /etc/nginx/sites-available/digit-hab-temp /etc/nginx/sites-enabled/
+sudo nginx -t && sudo systemctl reload nginx
+
+# 4. Obtenir les certificats
+sudo certbot certonly --webroot \
+  -w /var/www/certbot \
+  -d digit-hab.altoppe.sn \
+  -d api.digit-hab.altoppe.sn
+
+# 5. Supprimer la config temporaire
+sudo rm /etc/nginx/sites-enabled/digit-hab-temp
 ```
 
-Contenu :
+---
 
-```nginx
-upstream digit_hab_backend {
-    server localhost:8001;  # Port du service web digit-hab
-}
+## 📋 Checklist de Déploiement
 
-server {
-    listen 80;
-    server_name digit-hab.com www.digit-hab.com api.digit-hab.com;
-    return 301 https://$server_name$request_uri;
-}
+### Avant le Déploiement
 
-server {
-    listen 443 ssl;
-    server_name digit-hab.com www.digit-hab.com api.digit-hab.com;
+- [ ] DNS configuré (digit-hab.altoppe.sn → IP VPS)
+- [ ] Docker installé et fonctionnel
+- [ ] Code transféré sur le VPS (`/var/www/digit-hab-crm/`)
+- [ ] Fichier `.env` configuré avec les bonnes valeurs
+- [ ] `docker-compose.prod.yml` utilise le port 8001 (pas de conflit)
 
-    ssl_certificate /etc/letsencrypt/live/digit-hab.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/digit-hab.com/privkey.pem;
+### Certificats SSL
 
-    location /static/ {
-        alias /var/www/digit-hab-crm/staticfiles/;
-    }
+- [ ] Certificats Let's Encrypt obtenus
+- [ ] Certificats valides pour `digit-hab.altoppe.sn`
+- [ ] Certificats valides pour `api.digit-hab.altoppe.sn`
+- [ ] Renouvellement automatique configuré
 
-    location /media/ {
-        alias /var/www/digit-hab-crm/media/;
-    }
+### Configuration Nginx
 
-    location / {
-        proxy_pass http://digit_hab_backend;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-}
-```
+- [ ] Fichier `/etc/nginx/sites-available/digit-hab` créé
+- [ ] Lien symbolique dans `/etc/nginx/sites-enabled/`
+- [ ] Configuration testée (`sudo nginx -t`)
+- [ ] Nginx rechargé (`sudo systemctl reload nginx`)
+- [ ] Rate limiting configuré
+
+### Application Docker
+
+- [ ] Images buildées (`docker compose build`)
+- [ ] Services démarrés (`docker compose up -d`)
+- [ ] Tous les conteneurs running (`docker compose ps`)
+- [ ] Migrations appliquées
+- [ ] Statiques collectés
+- [ ] Superuser créé
+
+### Tests
+
+- [ ] Health check : https://digit-hab.altoppe.sn/health/
+- [ ] Admin accessible : https://digit-hab.altoppe.sn/admin/
+- [ ] API fonctionne : https://api.digit-hab.altoppe.sn/api/
+- [ ] CORS configuré correctement
+- [ ] HTTPS fonctionne (redirect HTTP → HTTPS)
+
+---
+
+## 🔧 Commandes sur le VPS
+
+### Résumé Complet (Copier-Coller)
 
 ```bash
-# Activer le site
-sudo ln -s /etc/nginx/sites-available/digit-hab.com /etc/nginx/sites-enabled/
+# ============================================
+# DÉPLOIEMENT DIGIT-HAB CRM - VPS
+# ============================================
 
-# Tester la config
+# 1. Obtenir les certificats SSL
+sudo certbot certonly --nginx \
+  -d digit-hab.altoppe.sn \
+  -d api.digit-hab.altoppe.sn \
+  --email souleymane9700@gmail.com \
+  --agree-tos
+
+# 2. Vérifier les certificats
+sudo ls -la /etc/letsencrypt/live/digit-hab.altoppe.sn/
+
+# 3. Aller dans le dossier du projet
+cd /var/www/digit-hab-crm
+
+# 4. Vérifier le fichier .env
+cat .env | head -20
+
+# 5. Build et démarrer
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d
+
+# 6. Migrations
+docker compose -f docker-compose.prod.yml exec web python manage.py migrate
+
+# 7. Créer superuser
+docker compose -f docker-compose.prod.yml exec web python manage.py createsuperuser
+
+# 8. Collecter statiques
+docker compose -f docker-compose.prod.yml exec web python manage.py collectstatic --noinput
+
+# 9. Configurer Nginx
+sudo nano /etc/nginx/sites-available/digit-hab
+# Copier le contenu de nginx-site.conf
+
+# 10. Activer le site
+sudo ln -s /etc/nginx/sites-available/digit-hab /etc/nginx/sites-enabled/
+
+# 11. Tester et recharger Nginx
 sudo nginx -t
-
-# Recharger nginx
 sudo systemctl reload nginx
-```
 
-Modifiez ensuite le `docker-compose.prod.yml` pour exposer le web sur le port 8001 :
+# 12. Vérifier les services
+docker compose -f docker-compose.prod.yml ps
 
-```yaml
-web:
-  ...
-  ports:
-    - "8001:8000"  # Exposer sur le port 8001
+# 13. Tester l'application
+curl https://digit-hab.altoppe.sn/health/
+curl https://api.digit-hab.altoppe.sn/api/
 ```
 
 ---
 
-## 📊 Commandes Utiles Multi-Projets
+## 🎯 Résolution du Problème Port 80
 
-### Gérer AL-TOPPE
+Puisque le port 80 est déjà utilisé par votre Nginx principal (pour al-toppe), vous avez **déjà la bonne approche** :
 
-```bash
-cd /var/www/al-toppe
-docker compose ps
-docker compose logs -f
-docker compose restart
-```
+### ✅ Ce Qu'il Faut Faire
 
-### Gérer DIGIT-HAB
+1. **Docker Compose** : N'expose PAS les ports 80/443
+   - Utilise `docker-compose.prod.yml` avec port `8001:8000`
+   - Nginx interne Docker **désactivé** ou retiré
+
+2. **Nginx Principal** : Gère tous les domaines
+   - `altoppe.sn` → localhost:8000 (projet al-toppe)
+   - `digit-hab.altoppe.sn` → localhost:8001 (digit-hab-crm)
+
+3. **Certificats SSL** : Obtenus via plugin nginx
+   - Ne bloque pas le port 80
+   - Utilise le Nginx déjà en marche
+
+---
+
+## 📝 Configuration .env pour Production
 
 ```bash
 cd /var/www/digit-hab-crm
-docker compose -f docker-compose.prod.yml ps
-docker compose -f docker-compose.prod.yml logs -f
-docker compose -f docker-compose.prod.yml restart
+nano .env
 ```
 
-### Voir Tous les Conteneurs
+**Valeurs IMPORTANTES à changer** :
 
 ```bash
-docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
-```
+DEBUG=False                          # ⚠️ CRITICAL
+SECRET_KEY=...                       # ⚠️ GÉNÉRER UNE NOUVELLE
+ALLOWED_HOSTS=digit-hab.altoppe.sn,api.digit-hab.altoppe.sn
 
-### Surveiller les Ressources
-
-```bash
-# Utiliser ctop
-ctop
-
-# Ou htop
-htop
-
-# Ou docker stats
-docker stats
+# Générer une nouvelle SECRET_KEY
+docker run --rm python:3.11 python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
 ```
 
 ---
 
-## 🔧 Maintenance
+## 🔄 Gestion des Deux Projets
 
-### Backup des Deux Projets
+### Voir les Services en Cours
 
 ```bash
-# Script de backup global
-nano ~/backup-all-projects.sh
+# Projet al-toppe
+cd /var/www/al-toppe
+docker compose ps
+
+# Projet digit-hab-crm
+cd /var/www/digit-hab-crm
+docker compose -f docker-compose.prod.yml ps
+
+# Tous les conteneurs Docker
+docker ps
+```
+
+### Logs
+
+```bash
+# al-toppe
+docker compose -f /var/www/al-toppe/docker-compose.yml logs -f
+
+# digit-hab-crm
+docker compose -f /var/www/digit-hab-crm/docker-compose.prod.yml logs -f web
+
+# Nginx principal
+sudo tail -f /var/log/nginx/digit-hab-access.log
+sudo tail -f /var/log/nginx/digit-hab-error.log
+```
+
+### Redémarrer un Projet
+
+```bash
+# Redémarrer digit-hab-crm
+cd /var/www/digit-hab-crm
+docker compose -f docker-compose.prod.yml restart
+
+# Redémarrer al-toppe
+cd /var/www/al-toppe
+docker compose restart
+```
+
+---
+
+## 🐛 Problèmes Courants
+
+### Problème : Port 8001 déjà utilisé
+
+```bash
+# Vérifier qui utilise le port
+sudo lsof -i :8001
+sudo netstat -tulpn | grep 8001
+
+# Changer le port dans docker-compose.prod.yml
+# ports:
+#   - "8002:8000"  # Utiliser 8002 au lieu de 8001
+
+# Puis mettre à jour nginx-site.conf
+# upstream digit_hab_backend {
+#     server localhost:8002;
+# }
+```
+
+### Problème : Nginx ne démarre pas
+
+```bash
+# Tester la configuration
+sudo nginx -t
+
+# Voir les erreurs
+sudo journalctl -u nginx -n 50
+
+# Vérifier les logs
+sudo tail -f /var/log/nginx/error.log
+```
+
+### Problème : Application Django ne répond pas
+
+```bash
+# Vérifier les logs Docker
+docker compose -f docker-compose.prod.yml logs web
+
+# Vérifier que le conteneur est UP
+docker compose -f docker-compose.prod.yml ps
+
+# Tester en local sur le VPS
+curl http://localhost:8001/health/
+```
+
+---
+
+## 📊 Monitoring des Deux Projets
+
+### Créer un Script de Status
+
+```bash
+nano ~/check-status.sh
 ```
 
 ```bash
 #!/bin/bash
 
-BACKUP_DIR="/home/digit-hab/backups"
-DATE=$(date +%Y%m%d_%H%M%S)
+echo "╔════════════════════════════════════════════╗"
+echo "║     STATUS DES PROJETS - VPS               ║"
+echo "╚════════════════════════════════════════════╝"
+echo ""
 
-mkdir -p $BACKUP_DIR
-
-# Backup AL-TOPPE
+echo "📊 AL-TOPPE:"
 cd /var/www/al-toppe
-docker compose exec -T db pg_dump -U user dbname > $BACKUP_DIR/altoppe_db_$DATE.sql
-tar -czf $BACKUP_DIR/altoppe_media_$DATE.tar.gz media/
+docker compose ps
+echo ""
 
-# Backup DIGIT-HAB
+echo "📊 DIGIT-HAB CRM:"
 cd /var/www/digit-hab-crm
-docker compose -f docker-compose.prod.yml exec -T db pg_dump -U digit_hab_user digit_hab_crm_prod > $BACKUP_DIR/digithab_db_$DATE.sql
-tar -czf $BACKUP_DIR/digithab_media_$DATE.tar.gz media/
+docker compose -f docker-compose.prod.yml ps
+echo ""
 
-# Garder 7 jours
-find $BACKUP_DIR -type f -mtime +7 -delete
+echo "🌐 NGINX:"
+sudo systemctl status nginx --no-pager | head -5
+echo ""
 
-echo "Backup completed: $DATE"
+echo "💾 ESPACE DISQUE:"
+df -h | grep -E 'Filesystem|/dev/vda|/dev/sda'
+echo ""
+
+echo "🔥 MÉMOIRE:"
+free -h
+echo ""
+
+echo "✅ Vérification terminée!"
 ```
 
 ```bash
-chmod +x ~/backup-all-projects.sh
-
-# Ajouter au cron
-crontab -e
-# 0 2 * * * /home/digit-hab/backup-all-projects.sh
+chmod +x ~/check-status.sh
+./check-status.sh
 ```
 
 ---
 
-## ✅ Checklist de Déploiement
+## 🎉 Résumé Final
 
-- [ ] Dossier `/var/www/digit-hab-crm` créé
-- [ ] Fichiers transférés
-- [ ] `.env` configuré avec des mots de passe uniques
-- [ ] `docker-compose.prod.yml` avec noms de conteneurs uniques
-- [ ] Certificats SSL générés
-- [ ] Services démarrés
-- [ ] Migrations appliquées
-- [ ] Superuser créé
-- [ ] Tests d'accès réussis
-- [ ] Backup configuré
+### Ce Qu'il Faut Faire sur le VPS
+
+1. **Obtenir SSL** (avec Nginx qui tourne) :
+   ```bash
+   sudo certbot certonly --nginx \
+     -d digit-hab.altoppe.sn \
+     -d api.digit-hab.altoppe.sn
+   ```
+
+2. **Configurer Nginx** :
+   ```bash
+   sudo nano /etc/nginx/sites-available/digit-hab
+   # Copier nginx-site.conf
+   sudo ln -s /etc/nginx/sites-available/digit-hab /etc/nginx/sites-enabled/
+   sudo nginx -t && sudo systemctl reload nginx
+   ```
+
+3. **Déployer Docker** :
+   ```bash
+   cd /var/www/digit-hab-crm
+   docker compose -f docker-compose.prod.yml up -d
+   docker compose -f docker-compose.prod.yml exec web python manage.py migrate
+   docker compose -f docker-compose.prod.yml exec web python manage.py createsuperuser
+   docker compose -f docker-compose.prod.yml exec web python manage.py collectstatic --noinput
+   ```
+
+4. **Tester** :
+   ```bash
+   curl https://api.digit-hab.altoppe.sn/api/
+   ```
 
 ---
 
-**🎉 Les deux projets cohabitent maintenant sur le même VPS !**
-
-*Pour toute question : support@digit-hab.com*
+**🚀 Continuez et dites-moi où vous en êtes !**

@@ -173,6 +173,7 @@ daphne -b 0.0.0.0 -p 8000 digit_hab_crm.asgi:application
 - Intégration Stripe
 - Signatures électroniques
 - Commission calculation
+prévoir dès le départ la gestion locative (baux, quittances, régularisation charges) ?
 
 ### **Phase 4 : Frontend (à venir)**
 - Application web Next.js 14

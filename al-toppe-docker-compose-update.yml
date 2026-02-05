@@ -1,0 +1,30 @@
+# ════════════════════════════════════════════════════════
+# Modifications à apporter au docker-compose.prod.yml d'AL-TOPPE
+# Pour gérer aussi DIGIT-HAB CRM
+# ════════════════════════════════════════════════════════
+
+# Dans le service nginx, REMPLACER la section volumes par :
+
+nginx:
+  image: nginx:alpine
+  ports:
+    - "80:80"
+    - "443:443"
+  volumes:
+    - ./nginx.prod.conf:/etc/nginx/nginx.conf:ro
+    - ./staticfiles:/var/www/al-toppe/staticfiles:ro
+    - ./media:/var/www/al-toppe/media:ro
+    - ./ssl:/etc/nginx/ssl:ro
+    # ✅ AJOUTS pour DIGIT-HAB
+    - /var/www/digit-hab-crm/staticfiles:/var/www/digit-hab-crm/staticfiles:ro
+    - /var/www/digit-hab-crm/media:/var/www/digit-hab-crm/media:ro
+    - /etc/letsencrypt:/etc/letsencrypt:ro
+    - /var/www/certbot:/var/www/certbot:ro
+  depends_on:
+    - web
+  networks:
+    - app-network
+  restart: unless-stopped
+  # ✅ AJOUT : permettre de communiquer avec l'hôte (pour digit-hab:8001)
+  extra_hosts:
+    - "host.docker.internal:host-gateway"

@@ -1,0 +1,105 @@
+services:
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${DB_NAME:-digit_hab_crm_prod}
+      POSTGRES_USER: ${DB_USER:-digit_hab_crm_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --requirepass ${REDIS_PASSWORD:-digit_hab_crm_redis_password}
+    volumes:
+      - redis_data:/data
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  web:
+    build: .
+    environment:
+      - DEBUG=False
+      - SECRET_KEY=${SECRET_KEY}
+      - DB_NAME=${DB_NAME:-digit_hab_crm_prod}
+      - DB_USER=${DB_USER:-digit_hab_crm_user}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-digit_hab_crm_redis_password}@redis:6379/0
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS}
+    volumes:
+      - ./staticfiles:/app/staticfiles
+      - ./media:/app/media
+    networks:
+      - app-network
+    ports:
+      - "8001:8000"  # ⚠️ Port différent pour ne pas conflictuer avec al-toppe
+    restart: unless-stopped
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             gunicorn --bind 0.0.0.0:8000 --workers 4 --worker-class gthread --threads 2 --timeout 60 digit_hab_crm.wsgi:application"
+
+  celery-worker:
+    build: .
+    environment:
+      - DEBUG=False
+      - SECRET_KEY=${SECRET_KEY}
+      - DB_NAME=${DB_NAME:-digit_hab_crm_prod}
+      - DB_USER=${DB_USER:-digit_hab_crm_user}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_ENGINE=django.db.backends.postgresql
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-digit_hab_crm_redis_password}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-digit_hab_crm_redis_password}@redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-digit_hab_crm_redis_password}@redis:6379/0
+    volumes:
+      - ./staticfiles:/app/staticfiles
+      - ./media:/app/media
+    networks:
+      - app-network
+    restart: unless-stopped
+    depends_on:
+      - db
+      - redis
+    command: python -m celery -A digit_hab_crm worker --loglevel=info --concurrency=2
+
+  celery-beat:
+    build: .
+    environment:
+      - DEBUG=False
+      - SECRET_KEY=${SECRET_KEY}
+      - DB_NAME=${DB_NAME:-digit_hab_crm_prod}
+      - DB_USER=${DB_USER:-digit_hab_crm_user}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_ENGINE=django.db.backends.postgresql
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD:-digit_hab_crm_redis_password}@redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD:-digit_hab_crm_redis_password}@redis:6379/0
+      - REDIS_URL=redis://:${REDIS_PASSWORD:-digit_hab_crm_redis_password}@redis:6379/0
+    volumes:
+      - ./staticfiles:/app/staticfiles
+      - ./media:/app/media
+    networks:
+      - app-network
+    restart: unless-stopped
+    depends_on:
+      - db
+      - redis
+      - celery-worker
+    command: python -m celery -A digit_hab_crm beat --loglevel=info
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  app-network:
+    driver: bridge
