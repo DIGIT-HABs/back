@@ -7,13 +7,14 @@ from django.db.models import Avg
 from apps.auth.serializers import UserSerializer
 from apps.properties.serializers import PropertyListSerializer
 from .models import Review, ReviewHelpful
+from apps.auth.models import User
 
 
 class ReviewSerializer(serializers.ModelSerializer):
     """Serializer for Review model."""
     
     author_name = serializers.CharField(source='author.get_full_name', read_only=True)
-    author_avatar = serializers.SerializerMethodField()
+    author_avatar = serializers.SerializerMethodField(source='author.avatar')
     property_title = serializers.CharField(source='property.title', read_only=True)
     agent_name = serializers.CharField(source='agent.get_full_name', read_only=True)
     response_by_name = serializers.CharField(source='response_by.get_full_name', read_only=True)
@@ -41,9 +42,9 @@ class ReviewSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at',
         ]
     
-    def get_author_avatar(user: User):
+    def get_author_avatar(self, obj: Review):
         """Get author avatar URL."""
-        avatar = getattr(user, "avatar", None)
+        avatar = getattr(obj.author, "avatar", None)
     # Pour un ImageField/FileField sans fichier, avatar existe mais avatar.name est vide
         if not avatar or not getattr(avatar, "name", ""):
             return None

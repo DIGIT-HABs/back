@@ -127,6 +127,7 @@ python manage.py createsuperuser
 
 # 6. Lancer le serveur
 python manage.py runserver
+daphne -b 0.0.0.0 -p 8000 digit_hab_crm.asgi:application
 ```
 
 ### **Accès à l'Application :**
