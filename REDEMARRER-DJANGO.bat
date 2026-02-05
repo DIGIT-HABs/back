@@ -14,6 +14,6 @@ python manage.py runserver 0.0.0.0:8000
 echo.
 echo ============================================
 echo    Serveur Django demarre !
-echo    URL: http://192.168.1.82:8000
+echo    URL: https://api.digit-hab.altoppe.sn/
 echo ============================================
 pause

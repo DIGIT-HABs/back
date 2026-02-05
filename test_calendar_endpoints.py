@@ -8,8 +8,8 @@ import json
 from datetime import datetime, timedelta, date, time
 
 # Configuration
-BASE_URL = "http://192.168.1.82:8000/api/calendar"
-AUTH_URL = "http://192.168.1.82:8000/api/auth/login/"
+BASE_URL = "https://api.digit-hab.altoppe.sn/api/calendar"
+AUTH_URL = "https://api.digit-hab.altoppe.sn/api/auth/login/"
 
 # Couleurs pour le terminal
 class Colors:

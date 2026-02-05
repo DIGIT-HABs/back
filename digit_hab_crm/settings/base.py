@@ -251,19 +251,19 @@ CACHES = {
         'BACKEND': 'django_redis.cache.RedisCache',
         'LOCATION': REDIS_URL,
         'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+            'PARSER_CLASS': 'redis.connection.HiredisParser',
+            'CONNECTION_POOL_KWARGS': {
+                'max_connections': 50,
+                'retry_on_timeout': True,
+            }
         }
-    },
-    'sessions': {
-        'BACKEND': 'django_redis.sessions.backends.cache',
-        'LOCATION': 'redis://localhost:6379/3',
     }
 }
 
 # Session Configuration
-SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
-SESSION_CACHE_ALIAS = 'sessions'
+SESSION_ENGINE = 'django.contrib.sessions.backends.db'  # Use DB instead of Redis for sessions
 SESSION_COOKIE_AGE = 86400  # 1 day
+SESSION_SAVE_EVERY_REQUEST = False
 
 # Email Configuration
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -388,7 +388,12 @@ ASGI_APPLICATION = 'digit_hab_crm.asgi.application'
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels.layers.InMemoryChannelLayer' if DEBUG else 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {} if DEBUG else {"hosts": [('127.0.0.1', 6379)]},
+        'CONFIG': {} if DEBUG else {
+            "hosts": [(
+                config('REDIS_HOST', default='redis'),
+                config('REDIS_PORT', default=6379, cast=int)
+            )],
+        },
     },
 }
 
