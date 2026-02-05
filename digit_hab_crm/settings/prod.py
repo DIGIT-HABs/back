@@ -38,21 +38,21 @@ DATABASES = {
 }
 
 # # Database - Production
-# DATABASES = {
-#     'default': {
-#         'ENGINE': 'django.contrib.gis.db.backends.postgis',
-#         'NAME': os.environ.get('DB_NAME', 'digit_hab_crm_prod'),
-#         'USER': os.environ.get('DB_USER', 'postgres'),
-#         'PASSWORD': os.environ.get('DB_PASSWORD'),
-#         'HOST': os.environ.get('DB_HOST', 'localhost'),
-#         'PORT': os.environ.get('DB_PORT', '5432'),
-#         'OPTIONS': {
-#             'charset': 'utf8',
-#             'sslmode': 'require',
-#         },
-#         'CONN_MAX_AGE': 60,
-#     }
-# }
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.contrib.gis.db.backends.postgis',
+        'NAME': os.environ.get('DB_NAME', 'digit_hab_crm_prod'),
+        'USER': os.environ.get('DB_USER', 'postgres'),
+        'PASSWORD': os.environ.get('DB_PASSWORD'),
+        'HOST': os.environ.get('DB_HOST', 'localhost'),
+        'PORT': os.environ.get('DB_PORT', '5432'),
+        'OPTIONS': {
+            'charset': 'utf8',
+            'sslmode': 'require',
+        },
+        'CONN_MAX_AGE': 60,
+    }
+}
 
 # Email backend for production
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -71,9 +71,9 @@ CELERY_TASK_ALWAYS_EAGER = False
 CELERY_EAGER_PROPAGATES_EXCEPTIONS = False
 
 # CORS for production
-CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOWED_ORIGINS = [
-    'https://your-domain.com',
+    'https://api.digit-hab.altoppe.sn',
     'https://www.your-domain.com',
 ]
 
