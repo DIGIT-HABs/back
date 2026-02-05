@@ -11,7 +11,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.contenttypes.models import ContentType
 from asgiref.sync import sync_to_async
 
-from ..models import Notification, NotificationSubscription
+from .models import Notification, NotificationSubscription
 
 User = get_user_model()
 logger = logging.getLogger(__name__)

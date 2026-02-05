@@ -5,8 +5,8 @@ Development settings.
 from .base import *
 
 # Development specific settings
-DEBUG = True
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0', '[::1]', '192.168.1.135', '*']
+DEBUG = False
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0', '[::1]', '192.168.1.82', '*']
 
 
 # SQLITE
@@ -53,8 +53,8 @@ MIDDLEWARE += ['debug_toolbar.middleware.DebugToolbarMiddleware']
 INTERNAL_IPS = ['127.0.0.1', 'localhost']
 
 # Development logging
-LOGGING['loggers']['django']['level'] = 'DEBUG'
-LOGGING['loggers']['digit_hab_crm']['level'] = 'DEBUG'
+# LOGGING['loggers']['django']['level'] = 'DEBUG'
+# LOGGING['loggers']['digit_hab_crm']['level'] = 'DEBUG'
 
 # Disable HTTPS
 SESSION_COOKIE_SECURE = False

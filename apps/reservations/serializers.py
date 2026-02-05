@@ -112,8 +112,11 @@ class ReservationSerializer(serializers.ModelSerializer):
     
     # Status information
     is_expired = serializers.BooleanField(read_only=True)
+    is_stay_ended = serializers.BooleanField(read_only=True)
     can_be_cancelled = serializers.SerializerMethodField()
     can_be_confirmed = serializers.SerializerMethodField()
+    
+    primary_image_url = serializers.SerializerMethodField()
     
     # Payment information
     payments = PaymentSerializer(many=True, read_only=True)
@@ -126,7 +129,7 @@ class ReservationSerializer(serializers.ModelSerializer):
         model = Reservation
         fields = [
             # Basic Information
-            'id', 'reservation_type', 'status', 'amount', 'currency',
+            'id', 'reservation_type', 'status', 'amount', 'currency', 'primary_image_url',
             
             # Property and Client
             'property', 'property_id', 'client_profile', 'client_profile_id',
@@ -162,7 +165,7 @@ class ReservationSerializer(serializers.ModelSerializer):
             
             # Computed fields
             'client_name_display', 'total_participants', 'outstanding_amount',
-            'is_expired', 'can_be_cancelled', 'can_be_confirmed',
+            'is_expired', 'is_stay_ended', 'can_be_cancelled', 'can_be_confirmed',
             
             # Related data
             'payments',
@@ -174,6 +177,14 @@ class ReservationSerializer(serializers.ModelSerializer):
             'id', 'status', 'confirmed_at', 'cancelled_at', 'completed_at',
             'created_at', 'updated_at', 'payment_status'
         ]
+    
+    def get_primary_image_url(self, obj):
+        """Get the primary image URL."""
+        primary_image = obj.property.images.filter(is_primary=True).first()
+        if primary_image:
+            return primary_image.image.url
+        first_image = obj.property.images.first()
+        return first_image.image.url if first_image else None   
     
     def get_can_be_cancelled(self, obj):
         """Check if reservation can be cancelled."""
@@ -243,11 +254,14 @@ class ReservationSerializer(serializers.ModelSerializer):
                 })
         
         # Set default values
-        if not data.get('assigned_agent') and hasattr(self.context.get('request'), 'user'):
-            data['assigned_agent'] = self.context['request'].user
-        
-        if not data.get('created_by') and hasattr(self.context.get('request'), 'user'):
-            data['created_by'] = self.context['request'].user
+        request = self.context.get('request')
+        if request and request.user:
+            # assigned_agent: only default to current user if they are agent/manager/admin (creating on behalf of client).
+            # Otherwise leave None so post_save signal can assign property.agent for client-created reservations.
+            if not data.get('assigned_agent') and getattr(request.user, 'role', None) in ('agent', 'manager', 'admin'):
+                data['assigned_agent'] = request.user
+            if not data.get('created_by'):
+                data['created_by'] = request.user
         
         return data
 

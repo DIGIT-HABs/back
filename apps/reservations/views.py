@@ -8,6 +8,7 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from apps.auth.models import User
@@ -79,15 +80,19 @@ class ReservationViewSet(viewsets.ModelViewSet):
                     'property', 'client_profile__user', 'assigned_agent', 'created_by'
                 ).prefetch_related('payments')
         
-        # Clients see only their own reservations
+        # Clients see only their own reservations (by profile, email or created_by)
         if user.role == 'client':
             client_profile = getattr(user, 'client_profile', None)
+            base = Reservation.objects.select_related(
+                'property', 'client_profile__user', 'assigned_agent', 'created_by'
+            ).prefetch_related('payments')
             if client_profile:
-                return Reservation.objects.filter(
-                    client_profile=client_profile
-                ).select_related(
-                    'property', 'client_profile__user', 'assigned_agent', 'created_by'
-                ).prefetch_related('payments')
+                return base.filter(
+                    Q(client_profile=client_profile)
+                    | Q(client_email=user.email)
+                    | Q(created_by=user)
+                )
+            return base.filter(Q(client_email=user.email) | Q(created_by=user))
         
         return Reservation.objects.none()
     
@@ -105,7 +110,7 @@ class ReservationViewSet(viewsets.ModelViewSet):
         """Get permissions for different actions."""
         if self.action in ['list', 'retrieve']:
             permission_classes = [CanViewAllReservations | ReadOnly]
-        elif self.action == 'create':
+        elif self.action in ['create', 'my_reservations', 'activities']:
             permission_classes = [IsAuthenticated]
         elif self.action in ['update', 'partial_update', 'destroy']:
             permission_classes = [IsReservationOwnerOrAgent | CanManageReservations]
@@ -249,18 +254,8 @@ class ReservationViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['get'], permission_classes=[IsAuthenticated])
     def activities(self, request, pk=None):
-        """Get reservation activity log."""
+        """Get reservation activity log. Access follows get_queryset() (owner/agent/client_email/created_by)."""
         reservation = self.get_object()
-        
-        # Check permission
-        if not (request.user.is_staff or request.user.is_superuser or 
-                reservation.assigned_agent == request.user or
-                (reservation.client_profile and reservation.client_profile.user == request.user)):
-            return Response(
-                {'error': 'Vous n\'êtes pas autorisé à voir le journal d\'activité.'},
-                status=status.HTTP_403_FORBIDDEN
-            )
-        
         activities = reservation.activities.select_related('performed_by').order_by('-created_at')
         serializer = ReservationActivitySerializer(activities, many=True)
         return Response(serializer.data)
@@ -312,7 +307,7 @@ class ReservationViewSet(viewsets.ModelViewSet):
         serializer = ReservationStatsSerializer(stats)
         return Response(serializer.data)
     
-    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
+    @action(detail=False, methods=['get'], url_path='my-reservations', permission_classes=[IsAuthenticated])
     def my_reservations(self, request):
         """Get current user's reservations."""
         user = request.user
@@ -326,12 +321,25 @@ class ReservationViewSet(viewsets.ModelViewSet):
         
         if user.role == 'client':
             client_profile = getattr(user, 'client_profile', None)
+            base = Reservation.objects.select_related(
+                'property', 'client_profile__user', 'assigned_agent', 'created_by'
+            ).prefetch_related('payments')
             if client_profile:
-                queryset = Reservation.objects.filter(client_profile=client_profile)
+                queryset = base.filter(
+                    Q(client_profile=client_profile)
+                    | Q(client_email=user.email)
+                    | Q(created_by=user)
+                )
             else:
-                queryset = Reservation.objects.filter(client_email=user.email)
+                queryset = base.filter(
+                    Q(client_email=user.email) | Q(created_by=user)
+                )
         else:
-            queryset = Reservation.objects.filter(assigned_agent=user)
+            queryset = Reservation.objects.filter(
+                assigned_agent=user
+            ).select_related(
+                'property', 'client_profile__user', 'assigned_agent', 'created_by'
+            ).prefetch_related('payments')
         
         # Apply filters
         queryset = self.filter_queryset(queryset)

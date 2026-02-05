@@ -38,6 +38,9 @@ class UserSerializer(serializers.ModelSerializer):
     """Serializer for User model."""
     
     full_name = serializers.CharField(source='get_full_name', read_only=True)
+    agency = serializers.SerializerMethodField()
+    agency_id = serializers.SerializerMethodField()
+    role = serializers.CharField(read_only=True)
     
     class Meta:
         model = User
@@ -45,12 +48,32 @@ class UserSerializer(serializers.ModelSerializer):
             'id', 'username', 'email', 'first_name', 'last_name', 'full_name',
             'phone', 'avatar', 'bio', 'date_of_birth', 'preferred_contact_method',
             'is_active', 'is_verified', 'verified_at', 'last_activity', 'login_count',
+            'role', 'agency', 'agency_id',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
             'id', 'is_verified', 'verified_at', 'last_activity', 'login_count',
+            'role', 'agency', 'agency_id',
             'created_at', 'updated_at'
         ]
+    
+    def get_agency(self, obj):
+        """Get agency name from profile."""
+        try:
+            if hasattr(obj, 'profile') and obj.profile.agency:
+                return obj.profile.agency.name
+        except Exception:
+            pass
+        return None
+    
+    def get_agency_id(self, obj):
+        """Get agency ID from profile."""
+        try:
+            if hasattr(obj, 'profile') and obj.profile.agency:
+                return str(obj.profile.agency.id)
+        except Exception:
+            pass
+        return None
     
     def validate_email(self, value):
         """Validate email uniqueness."""

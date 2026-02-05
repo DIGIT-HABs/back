@@ -313,6 +313,34 @@ def cleanup_expired_reservations():
                 reservation.property.save(update_fields=['status'])
 
 
+def complete_ended_rent_stays():
+    """
+    Pour les locations (rent) : marque en "terminée" les réservations dont
+    le séjour est fini (scheduled_end_date dépassée) et remet le bien en disponible.
+    À appeler périodiquement (ex. tâche planifiée / Celery).
+    """
+    from django.db import transaction
+    
+    now = timezone.now()
+    ended_rents = Reservation.objects.filter(
+        reservation_type='rent',
+        status='confirmed',
+        scheduled_end_date__lt=now
+    ).select_related('property')
+    
+    with transaction.atomic():
+        for reservation in ended_rents:
+            reservation.complete(notes='Séjour terminé automatiquement (date de fin dépassée).')
+            ReservationActivity.objects.create(
+                reservation=reservation,
+                activity_type='completed',
+                description='Séjour terminé automatiquement (date de fin dépassée).',
+            )
+            if reservation.property.status == 'rented':
+                reservation.property.status = 'available'
+                reservation.property.save(update_fields=['status'])
+
+
 def send_visit_reminders():
     """
     Utility function to send visit reminders.

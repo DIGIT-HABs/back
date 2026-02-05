@@ -11,7 +11,7 @@ from django.utils import timezone
 from django.db.models import Q, Count, Avg, Sum
 from django.core.cache import cache
 
-from apps.auth.models import User
+from apps.auth.models import User, Agency
 from apps.properties.models import Property
 from .models import ClientProfile, PropertyInterest, ClientInteraction, Lead
 from .serializers import (
@@ -162,6 +162,187 @@ class ClientProfileViewSet(viewsets.ModelViewSet):
             }
             
             return Response(dashboard_data)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated, CanManageInteractions])
+    def interactions(self, request, pk=None):
+        """Get all interactions for a specific client."""
+        try:
+            client_profile = self.get_object()
+            client_user = client_profile.user
+            
+            # Get query parameters
+            interaction_type = request.query_params.get('interaction_type')
+            status_filter = request.query_params.get('status')
+            limit = int(request.query_params.get('limit', 50))
+            
+            # Build queryset
+            interactions = ClientInteraction.objects.filter(client=client_user)
+            
+            if interaction_type:
+                interactions = interactions.filter(interaction_type=interaction_type)
+            if status_filter:
+                interactions = interactions.filter(status=status_filter)
+            
+            interactions = interactions.order_by('-created_at')[:limit]
+            
+            serializer = ClientInteractionSerializer(interactions, many=True)
+            return Response(serializer.data)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated, CanCreateInteraction])
+    def add_interaction(self, request, pk=None):
+        """Add a new interaction for a client."""
+        try:
+            client_profile = self.get_object()
+            client_user = client_profile.user
+            
+            # Get agent (default to current user if agent)
+            agent_id = request.data.get('agent_id')
+            if agent_id:
+                agent = User.objects.get(id=agent_id, role='agent')
+            elif request.user.role == 'agent':
+                agent = request.user
+            else:
+                return Response(
+                    {'error': 'Agent requis pour créer une interaction.'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Create interaction
+            interaction_data = {
+                'client_id': str(client_user.id),
+                'agent_id': str(agent.id),
+                'interaction_type': request.data.get('interaction_type', 'call'),
+                'channel': request.data.get('channel', 'phone'),
+                'subject': request.data.get('subject', ''),
+                'content': request.data.get('content', ''),
+                'scheduled_date': request.data.get('scheduled_date'),
+                'priority': request.data.get('priority', 'medium'),
+                'status': request.data.get('status', 'scheduled')
+            }
+            
+            serializer = ClientInteractionSerializer(data=interaction_data)
+            if serializer.is_valid():
+                interaction = serializer.save()
+                return Response(ClientInteractionSerializer(interaction).data, status=status.HTTP_201_CREATED)
+            else:
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def stats(self, request, pk=None):
+        """Get client statistics."""
+        try:
+            client_profile = self.get_object()
+            client_user = client_profile.user
+            
+            # Get interactions stats
+            total_interactions = ClientInteraction.objects.filter(client=client_user).count()
+            completed_interactions = ClientInteraction.objects.filter(
+                client=client_user, status='completed'
+            ).count()
+            
+            # Get property interests stats
+            total_interests = PropertyInterest.objects.filter(client=client_user).count()
+            active_interests = PropertyInterest.objects.filter(
+                client=client_user, status='active'
+            ).count()
+            
+            # Get visits stats
+            total_visits = PropertyInterest.objects.filter(
+                client=client_user, interaction_type__in=['visit_scheduled', 'visit_request']
+            ).count()
+            
+            # Get recent activity (last 30 days)
+            from datetime import timedelta
+            thirty_days_ago = timezone.now() - timedelta(days=30)
+            recent_interactions = ClientInteraction.objects.filter(
+                client=client_user, created_at__gte=thirty_days_ago
+            ).count()
+            
+            stats = {
+                'profile': {
+                    'conversion_score': client_profile.conversion_score,
+                    'status': client_profile.status,
+                    'priority_level': client_profile.priority_level,
+                    'total_properties_viewed': client_profile.total_properties_viewed,
+                    'total_inquiries_made': client_profile.total_inquiries_made,
+                },
+                'interactions': {
+                    'total': total_interactions,
+                    'completed': completed_interactions,
+                    'recent_30_days': recent_interactions,
+                },
+                'interests': {
+                    'total': total_interests,
+                    'active': active_interests,
+                },
+                'visits': {
+                    'total': total_visits,
+                },
+                'last_activity': client_profile.last_property_view,
+            }
+            
+            return Response(stats)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated, IsAgentOrAdmin])
+    def contact(self, request, pk=None):
+        """Initiate contact action with client (call, email, SMS)."""
+        try:
+            client_profile = self.get_object()
+            client_user = client_profile.user
+            
+            contact_method = request.data.get('method', 'call')  # call, email, sms, whatsapp
+            subject = request.data.get('subject', '')
+            message = request.data.get('message', '')
+            
+            # Get agent (current user if agent)
+            if request.user.role == 'agent':
+                agent = request.user
+            else:
+                return Response(
+                    {'error': 'Seuls les agents peuvent contacter les clients.'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+            
+            # Create interaction record
+            interaction = ClientInteraction.objects.create(
+                client=client_user,
+                agent=agent,
+                interaction_type='call' if contact_method == 'call' else 'email',
+                channel=contact_method,
+                subject=subject or f'Contact {contact_method}',
+                content=message,
+                status='scheduled',
+                priority='medium'
+            )
+            
+            # Log the contact action
+            from apps.core.models import ActivityLog
+            from django.contrib.contenttypes.models import ContentType
+            
+            ActivityLog.objects.create(
+                user=agent,
+                action=f'CLIENT_CONTACT_{contact_method.upper()}',
+                content_type=ContentType.objects.get_for_model(client_profile),
+                object_id=client_profile.id,
+                changes={'method': contact_method, 'client': str(client_user)}
+            )
+            
+            return Response({
+                'message': f'Action de contact ({contact_method}) enregistrée.',
+                'interaction': ClientInteractionSerializer(interaction).data
+            }, status=status.HTTP_201_CREATED)
             
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
@@ -406,7 +587,12 @@ class LeadViewSet(viewsets.ModelViewSet):
             return queryset
         elif user.role == 'agent':
             # Agent can see leads for their agency
-            return queryset.filter(agency=user.agency)
+            agency = user.agency
+            if agency:
+                return queryset.filter(agency=agency)
+            else:
+                # Agent without agency sees no leads
+                return queryset.none()
         
         return queryset.none()
     
@@ -521,6 +707,124 @@ class LeadViewSet(viewsets.ModelViewSet):
             stats['conversion_rate'] = (won_leads / queryset.count()) * 100
         
         return Response(stats)
+    
+    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated, CanManageLeads])
+    def qualify(self, request, pk=None):
+        """Qualify a lead (hot, warm, cold, unqualified)."""
+        try:
+            lead = self.get_object()
+            qualification = request.data.get('qualification')
+            notes = request.data.get('notes', '')
+            
+            if not qualification:
+                return Response(
+                    {'error': 'Qualification requise (hot, warm, cold, unqualified).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            valid_qualifications = ['hot', 'warm', 'cold', 'unqualified']
+            if qualification not in valid_qualifications:
+                return Response(
+                    {'error': f'Qualification invalide. Valeurs acceptées: {", ".join(valid_qualifications)}'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            
+            # Update qualification
+            lead.qualification = qualification
+            if notes:
+                lead.notes = f"{lead.notes}\n\n[Qualification] {notes}" if lead.notes else f"[Qualification] {notes}"
+            
+            # Recalculate score based on qualification
+            lead.calculate_score()
+            
+            # Adjust score based on qualification
+            qualification_scores = {'hot': 20, 'warm': 10, 'cold': 5, 'unqualified': 0}
+            lead.score = min(lead.score + qualification_scores.get(qualification, 0), 100)
+            
+            lead.save()
+            
+            # Log qualification
+            from apps.core.models import ActivityLog
+            from django.contrib.contenttypes.models import ContentType
+            
+            ActivityLog.objects.create(
+                user=request.user,
+                action='LEAD_QUALIFIED',
+                content_type=ContentType.objects.get_for_model(Lead),
+                object_id=lead.id,
+                changes={'qualification': qualification, 'score': lead.score}
+            )
+            
+            serializer = self.get_serializer(lead)
+            return Response(serializer.data)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated, CanViewDashboard])
+    def pipeline(self, request):
+        """Get leads organized by pipeline stage (Kanban view)."""
+        try:
+            queryset = self.get_queryset()
+            
+            # Organize leads by status (pipeline stages)
+            pipeline = {
+                'new': {
+                    'title': 'Nouveaux',
+                    'leads': []
+                },
+                'contacted': {
+                    'title': 'Contactés',
+                    'leads': []
+                },
+                'qualified': {
+                    'title': 'Qualifiés',
+                    'leads': []
+                },
+                'proposal_sent': {
+                    'title': 'Proposition envoyée',
+                    'leads': []
+                },
+                'negotiation': {
+                    'title': 'En négociation',
+                    'leads': []
+                },
+                'won': {
+                    'title': 'Convertis',
+                    'leads': []
+                },
+                'lost': {
+                    'title': 'Perdus',
+                    'leads': []
+                }
+            }
+            
+            # Get leads for each stage
+            for status_key in pipeline.keys():
+                stage_leads = queryset.filter(status=status_key).order_by('-score', '-created_at')
+                serializer = self.get_serializer(stage_leads, many=True)
+                pipeline[status_key]['leads'] = serializer.data
+                pipeline[status_key]['count'] = stage_leads.count()
+            
+            # Calculate pipeline metrics
+            total_leads = queryset.count()
+            total_value = 0  # Could calculate based on budget_range if available
+            conversion_rate = 0
+            if total_leads > 0:
+                won_count = queryset.filter(status='won').count()
+                conversion_rate = (won_count / total_leads) * 100
+            
+            return Response({
+                'pipeline': pipeline,
+                'metrics': {
+                    'total_leads': total_leads,
+                    'conversion_rate': round(conversion_rate, 2),
+                    'total_value': total_value
+                }
+            })
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
 
 class PropertyMatchingViewSet(viewsets.ViewSet):

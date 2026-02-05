@@ -1,6 +1,8 @@
 """
 Models for reservations management with payment integration.
 """
+# Keep reference to builtin (Reservation.property is a ForeignKey and would shadow it)
+_property = property
 
 import uuid
 from django.db import models
@@ -273,6 +275,18 @@ class Reservation(models.Model):
             # Auto-expire pending reservations 24h after scheduled date
             return timezone.now() > self.scheduled_date + timezone.timedelta(hours=24)
         return False
+    
+    @_property
+    def is_stay_ended(self):
+        """
+        Pour une location (rent) : True si le séjour est terminé (date de fin dépassée).
+        Permet d'afficher "Séjour terminé" et de proposer de marquer la résa en "terminée".
+        """
+        if self.reservation_type != 'rent' or self.status != 'confirmed':
+            return False
+        if not self.scheduled_end_date:
+            return False
+        return timezone.now() > self.scheduled_end_date
     
     def get_total_participants(self):
         """Get total number of participants."""

@@ -45,6 +45,9 @@ LOCAL_APPS = [
     'apps.reservations',
     'apps.notifications',
     'apps.calendar',
+    'apps.commissions',
+    'apps.messaging',
+    'apps.reviews',
     'apps.core',
 ]
 
@@ -381,12 +384,11 @@ SIMPLE_JWT = {
 ASGI_APPLICATION = 'digit_hab_crm.asgi.application'
 
 # Channels layers (Redis for production, InMemory for development)
+# InMemoryChannelLayer accepts no CONFIG; RedisChannelLayer requires "hosts"
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels.layers.InMemoryChannelLayer' if DEBUG else 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            "hosts": [('127.0.0.1', 6379)] if not DEBUG else [],
-        },
+        'CONFIG': {} if DEBUG else {"hosts": [('127.0.0.1', 6379)]},
     },
 }
 
