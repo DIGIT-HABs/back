@@ -25,7 +25,7 @@ class CanModerateReviews(permissions.BasePermission):
     Permission to allow only agents and staff to moderate reviews.
     """
     
-    def has_permission(self, request, view):
+    def has_object_permission(self, request, view, obj):
         """Check if user can moderate reviews."""
         if not request.user.is_authenticated:
             return False
@@ -35,8 +35,33 @@ class CanModerateReviews(permissions.BasePermission):
             return True
         
         # Managers can moderate
-        if request.user.role == 'manager':
+        user = request.user
+        
+        if not user.is_authenticated:
+            return False
+        
+        # Staff can respond to any review
+        if user.is_staff or user.is_superuser:
             return True
+        
+        # Agent can respond to reviews about them
+        if obj.agent == user:
+            return True
+        
+        # Agent can respond to reviews about their properties
+        if obj.property and obj.property.agent == user:
+            return True
+        
+        # Agency manager can respond to reviews for their agency
+        if user.role == 'manager':
+            user_agency = getattr(user.profile, 'agency', None) if hasattr(user, 'profile') else None
+            if user_agency:
+                if obj.property and obj.property.agency == user_agency:
+                    return True
+                if obj.agent:
+                    agent_agency = getattr(obj.agent.profile, 'agency', None) if hasattr(obj.agent, 'profile') else None
+                    if agent_agency == user_agency:
+                        return True
         
         return False
 

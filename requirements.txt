@@ -91,9 +91,15 @@ stripe==10.10.0
 
 # Machine Learning & Optimization
 scipy==1.14.1
-numpy==2.1.3
+# numpy==2.1.3
 pandas==2.2.3
 
 # Job Scheduling
 django-celery-beat==2.7.0
 django-celery-results==2.5.1
+
+# Reporting & Export (Phase 1 Post-Deployment)
+reportlab==4.0.9
+openpyxl==3.1.2
+matplotlib==3.8.2
+xlsxwriter==3.2.0

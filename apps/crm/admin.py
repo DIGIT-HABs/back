@@ -3,18 +3,17 @@ Admin configuration for CRM app.
 """
 
 from django.contrib import admin
-from .models import ClientProfile, Lead, ClientInteraction, PropertyInterest
-
+from .models import ClientProfile, Lead, ClientInteraction, PropertyInterest, ClientNote
 
 @admin.register(ClientProfile)
 class ClientProfileAdmin(admin.ModelAdmin):
     """Admin for ClientProfile model."""
-    
+
     list_display = ['user', 'status', 'priority_level', 'financing_status', 'conversion_score', 'created_at']
     list_filter = ['status', 'priority_level', 'financing_status', 'preferred_contact_method', 'marital_status', 'created_at']
     search_fields = ['user__username', 'user__email', 'user__first_name', 'user__last_name']
     readonly_fields = ['id', 'conversion_score', 'total_properties_viewed', 'total_inquiries_made', 'last_property_view', 'created_at', 'updated_at']
-    
+
     fieldsets = (
         ('Utilisateur', {
             'fields': ('user',)
@@ -51,12 +50,12 @@ class ClientProfileAdmin(admin.ModelAdmin):
 @admin.register(Lead)
 class LeadAdmin(admin.ModelAdmin):
     """Admin for Lead model."""
-    
+
     list_display = ['full_name', 'email', 'phone', 'status', 'qualification', 'source', 'assigned_agent', 'score', 'created_at']
     list_filter = ['status', 'qualification', 'source', 'created_at']
     search_fields = ['first_name', 'last_name', 'email', 'phone', 'company']
     readonly_fields = ['id', 'score', 'created_at', 'updated_at']
-    
+
     fieldsets = (
         ('Informations du lead', {
             'fields': ('first_name', 'last_name', 'email', 'phone', 'company')
@@ -85,12 +84,12 @@ class LeadAdmin(admin.ModelAdmin):
 @admin.register(ClientInteraction)
 class ClientInteractionAdmin(admin.ModelAdmin):
     """Admin for ClientInteraction model."""
-    
+
     list_display = ['client', 'agent', 'interaction_type', 'channel', 'subject', 'status', 'scheduled_date', 'created_at']
     list_filter = ['interaction_type', 'channel', 'outcome', 'status', 'priority', 'scheduled_date', 'created_at']
     search_fields = ['client__username', 'agent__username', 'subject', 'content']
     readonly_fields = ['id', 'created_at', 'updated_at']
-    
+
     fieldsets = (
         ('Participants', {
             'fields': ('client', 'agent')
@@ -119,12 +118,12 @@ class ClientInteractionAdmin(admin.ModelAdmin):
 @admin.register(PropertyInterest)
 class PropertyInterestAdmin(admin.ModelAdmin):
     """Admin for PropertyInterest model."""
-    
+
     list_display = ['client', 'property', 'interaction_type', 'interest_level', 'match_score', 'status', 'interaction_date']
     list_filter = ['interaction_type', 'interest_level', 'status', 'interaction_date']
     search_fields = ['client__username', 'property__title', 'notes']
     readonly_fields = ['id', 'match_score', 'created_at', 'updated_at']
-    
+
     fieldsets = (
         ('Client et propriété', {
             'fields': ('client', 'property')

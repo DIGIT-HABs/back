@@ -10,14 +10,17 @@ from django_filters.rest_framework import DjangoFilterBackend
 from django.utils import timezone
 from django.db.models import Q, Count, Avg, Sum
 from django.core.cache import cache
+from django.http import HttpResponse
+from datetime import datetime
 
 from apps.auth.models import User, Agency
 from apps.properties.models import Property
-from .models import ClientProfile, PropertyInterest, ClientInteraction, Lead
+from .models import ClientProfile, PropertyInterest, ClientInteraction, Lead, ClientNote
 from .serializers import (
     ClientProfileSerializer, PropertyInterestSerializer, ClientInteractionSerializer,
     LeadSerializer, LeadConversionSerializer, PropertyMatchSerializer,
-    ClientDashboardSerializer, AgentDashboardSerializer
+    ClientDashboardSerializer, AgentDashboardSerializer,
+    ClientNoteSerializer, ClientNoteCreateSerializer
 )
 from .permissions import (
     IsClientOrOwner, IsAgentOrAdmin, CanManageClientProfile, CanManageLeads,
@@ -25,6 +28,7 @@ from .permissions import (
     CanCreateInteraction, CanAccessMatchingResults, CanViewDashboard, CanConvertLead
 )
 from .matching import PropertyMatcher, LeadMatcher, auto_match_properties_for_client, auto_assign_leads_to_agents
+from .services import ReportingService
 
 
 class ClientProfileViewSet(viewsets.ModelViewSet):
@@ -235,6 +239,48 @@ class ClientProfileViewSet(viewsets.ModelViewSet):
             
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['get'], url_path='notes', permission_classes=[permissions.IsAuthenticated, IsAgentOrAdmin])
+    def notes(self, request, pk=None):
+        """Get all notes for a specific client (Phase 1)."""
+        client_profile = self.get_object()
+        notes = ClientNote.objects.filter(client_profile=client_profile).select_related('author')
+        serializer = ClientNoteSerializer(notes, many=True, context={'request': request})
+        return Response(serializer.data)
+    
+    @action(detail=True, methods=['post'], url_path='notes/add', permission_classes=[permissions.IsAuthenticated, IsAgentOrAdmin])
+    def add_note(self, request, pk=None):
+        """Add a new note for a client (Phase 1)."""
+        client_profile = self.get_object()
+        serializer = ClientNoteCreateSerializer(data=request.data, context={'request': request})
+        
+        if serializer.is_valid():
+            serializer.save(client_profile=client_profile)
+            return Response(
+                ClientNoteSerializer(serializer.instance, context={'request': request}).data,
+                status=status.HTTP_201_CREATED
+            )
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=True, methods=['patch'], url_path='tags', permission_classes=[permissions.IsAuthenticated, IsAgentOrAdmin])
+    def update_tags(self, request, pk=None):
+        """Update client tags (Phase 1)."""
+        client_profile = self.get_object()
+        tags = request.data.get('tags', [])
+        
+        if not isinstance(tags, list):
+            return Response(
+                {'error': 'Tags doit être une liste'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        client_profile.tags = tags
+        client_profile.save(update_fields=['tags'])
+        
+        return Response({
+            'tags': client_profile.tags,
+            'message': 'Tags mis à jour avec succès'
+        })
     
     @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def stats(self, request, pk=None):
@@ -1024,6 +1070,231 @@ class DashboardViewSet(viewsets.ViewSet):
             }
             
             return Response(dashboard_data)
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+
+class ClientNoteViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing client notes (Phase 1 - Post-deployment).
+    Only accessible by agents and admins.
+    """
+    
+    queryset = ClientNote.objects.select_related('client_profile__user', 'author')
+    serializer_class = ClientNoteSerializer
+    permission_classes = [permissions.IsAuthenticated, IsAgentOrAdmin]
+    filter_backends = [DjangoFilterBackend, SearchFilter, OrderingFilter]
+    filterset_fields = {
+        'client_profile': ['exact'],
+        'author': ['exact'],
+        'note_type': ['exact'],
+        'is_important': ['exact'],
+        'is_pinned': ['exact'],
+    }
+    search_fields = ['title', 'content']
+    ordering_fields = ['created_at', 'updated_at', 'is_important', 'is_pinned']
+    ordering = ['-is_pinned', '-is_important', '-created_at']
+    
+    def get_queryset(self):
+        """Filter notes based on user permissions."""
+        user = self.request.user
+        queryset = super().get_queryset()
+        
+        if user.is_staff or user.is_superuser:
+            return queryset
+        
+        # Agents see notes for their agency's clients
+        if user.role in ['agent', 'manager']:
+            user_agency = getattr(user.profile, 'agency', None) if hasattr(user, 'profile') else None
+            if user_agency:
+                return queryset.filter(
+                    client_profile__user__profile__agency=user_agency
+                )
+        
+        return queryset.none()
+    
+    def get_serializer_class(self):
+        """Return appropriate serializer."""
+        if self.action == 'create':
+            return ClientNoteCreateSerializer
+        return ClientNoteSerializer
+    
+    @action(detail=True, methods=['post'], url_path='toggle-pin')
+    def toggle_pin(self, request, pk=None):
+        """Pin/unpin a note."""
+        note = self.get_object()
+        note.is_pinned = not note.is_pinned
+        note.save(update_fields=['is_pinned'])
+        
+        return Response({
+            'is_pinned': note.is_pinned,
+            'message': 'Note épinglée' if note.is_pinned else 'Note désépinglée'
+        })
+    
+    @action(detail=True, methods=['post'], url_path='toggle-important')
+    def toggle_important(self, request, pk=None):
+        """Mark/unmark note as important."""
+        note = self.get_object()
+        note.is_important = not note.is_important
+        note.save(update_fields=['is_important'])
+        
+        return Response({
+            'is_important': note.is_important,
+            'message': 'Note marquée importante' if note.is_important else 'Note démarquée'
+        })
+
+
+class ReportingViewSet(viewsets.ViewSet):
+    """
+    ViewSet for generating and exporting reports (Phase 1 - Post-deployment).
+    """
+    
+    permission_classes = [permissions.IsAuthenticated, IsAgentOrAdmin]
+    
+    @action(detail=False, methods=['get'], url_path='client-pdf/(?P<client_id>[^/.]+)')
+    def client_pdf(self, request, client_id=None):
+        """
+        Generate PDF report for a specific client.
+        
+        Query params:
+            - include_interactions: bool (default: true)
+            - include_notes: bool (default: true)
+        """
+        include_interactions = request.query_params.get('include_interactions', 'true').lower() == 'true'
+        include_notes = request.query_params.get('include_notes', 'true').lower() == 'true'
+        
+        try:
+            # Generate PDF
+            pdf_buffer = ReportingService.generate_client_report_pdf(
+                client_id=client_id,
+                include_interactions=include_interactions,
+                include_notes=include_notes
+            )
+            
+            # Get client name for filename
+            try:
+                client_profile = ClientProfile.objects.select_related('user').get(id=client_id)
+                filename = f"rapport_client_{client_profile.user.get_full_name().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.pdf"
+            except ClientProfile.DoesNotExist:
+                filename = f"rapport_client_{client_id}_{datetime.now().strftime('%Y%m%d')}.pdf"
+            
+            # Return PDF response
+            response = HttpResponse(pdf_buffer.read(), content_type='application/pdf')
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=False, methods=['get'], url_path='agent-performance/(?P<agent_id>[^/.]+)')
+    def agent_performance(self, request, agent_id=None):
+        """
+        Generate Excel report for agent performance.
+        
+        Query params:
+            - start_date: YYYY-MM-DD
+            - end_date: YYYY-MM-DD
+        """
+        # Parse dates
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+        
+        start_date = None
+        end_date = None
+        
+        if start_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            except ValueError:
+                return Response({'error': 'Invalid start_date format. Use YYYY-MM-DD'}, 
+                              status=status.HTTP_400_BAD_REQUEST)
+        
+        if end_date_str:
+            try:
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            except ValueError:
+                return Response({'error': 'Invalid end_date format. Use YYYY-MM-DD'}, 
+                              status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            # Generate Excel
+            excel_buffer = ReportingService.generate_agent_performance_excel(
+                agent_id=agent_id,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            # Get agent name for filename
+            try:
+                agent = User.objects.get(id=agent_id)
+                filename = f"performance_agent_{agent.get_full_name().replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+            except User.DoesNotExist:
+                filename = f"performance_agent_{agent_id}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+            
+            # Return Excel response
+            response = HttpResponse(
+                excel_buffer.read(),
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
+            
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+    
+    @action(detail=False, methods=['get'], url_path='agency-overview/(?P<agency_id>[^/.]+)')
+    def agency_overview(self, request, agency_id=None):
+        """
+        Generate Excel report for agency-wide overview.
+        
+        Query params:
+            - start_date: YYYY-MM-DD
+            - end_date: YYYY-MM-DD
+        """
+        # Parse dates
+        start_date_str = request.query_params.get('start_date')
+        end_date_str = request.query_params.get('end_date')
+        
+        start_date = None
+        end_date = None
+        
+        if start_date_str:
+            try:
+                start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            except ValueError:
+                return Response({'error': 'Invalid start_date format. Use YYYY-MM-DD'}, 
+                              status=status.HTTP_400_BAD_REQUEST)
+        
+        if end_date_str:
+            try:
+                end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            except ValueError:
+                return Response({'error': 'Invalid end_date format. Use YYYY-MM-DD'}, 
+                              status=status.HTTP_400_BAD_REQUEST)
+        
+        try:
+            # Generate Excel
+            excel_buffer = ReportingService.generate_agency_overview_excel(
+                agency_id=agency_id,
+                start_date=start_date,
+                end_date=end_date
+            )
+            
+            # Get agency name for filename
+            try:
+                agency = Agency.objects.get(id=agency_id)
+                filename = f"vue_agence_{agency.name.replace(' ', '_')}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+            except Agency.DoesNotExist:
+                filename = f"vue_agence_{agency_id}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+            
+            # Return Excel response
+            response = HttpResponse(
+                excel_buffer.read(),
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            response['Content-Disposition'] = f'attachment; filename="{filename}"'
+            return response
             
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)

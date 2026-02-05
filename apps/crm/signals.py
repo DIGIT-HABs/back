@@ -20,21 +20,27 @@ def client_profile_post_save(sender, instance, created, **kwargs):
         
         ActivityLog.objects.create(
             user=instance.user,
+            component='clients',
             action='CLIENT_PROFILE_CREATED',
-            content_type=ContentType.objects.get_for_model(instance),
-            object_id=instance.id,
-            changes={'created': True}
+            message=f'Client profile created for {instance.user.get_full_name()}',
+            metadata={
+                'content_type': 'ClientProfile',
+                'object_id': str(instance.id),
+                'changes': {'created': True}
+            }
         )
         
         # Send welcome notification
         from apps.core.models import Notification
         
         Notification.objects.create(
-            recipient=instance.user,
-            type='WELCOME_CLIENT',
+            recipient_type='user',
+            recipient_id=str(instance.user.id),
+            channel='in_app',
+            priority='normal',
             title='Bienvenue dans DIGIT-HAB CRM',
             message='Votre profil client a été créé avec succès. Découvrez nos propriétés qui vous correspondent !',
-            created_at=timezone.now()
+            metadata={'type': 'WELCOME_CLIENT'}
         )
     
     else:
@@ -61,20 +67,26 @@ def client_profile_post_save(sender, instance, created, **kwargs):
         if changes:
             ActivityLog.objects.create(
                 user=instance.user,
+                component='clients',
                 action='CLIENT_PROFILE_UPDATED',
-                content_type=ContentType.objects.get_for_model(instance),
-                object_id=instance.id,
-                changes=changes
+                message=f'Client profile updated for {instance.user.get_full_name()}',
+                metadata={
+                    'content_type': 'ClientProfile',
+                    'object_id': str(instance.id),
+                    'changes': changes
+                }
             )
             
             # Send notification for important changes
             if 'status' in changes and changes['status']['new'] == 'client':
                 Notification.objects.create(
-                    recipient=instance.user,
-                    type='CLIENT_STATUS_UPDATED',
+                    recipient_type='user',
+                    recipient_id=str(instance.user.id),
+                    channel='in_app',
+                    priority='normal',
                     title='Statut client activé',
                     message='Félicitations ! Votre statut a été mis à jour en tant que client.',
-                    created_at=timezone.now()
+                    metadata={'type': 'CLIENT_STATUS_UPDATED', 'changes': changes}
                 )
 
 
@@ -90,10 +102,12 @@ def property_interest_post_save(sender, instance, created, **kwargs):
         # Log interest creation
         ActivityLog.objects.create(
             user=instance.client,
+            component='properties',
             action='PROPERTY_INTEREST_CREATED',
-            content_type=ContentType.objects.get_for_model(instance),
-            object_id=instance.id,
-            changes={
+            message=f'{instance.client.get_full_name()} showed interest in {instance.property.title}',
+            metadata={
+                'content_type': 'PropertyInterest',
+                'object_id': str(instance.id),
                 'property': str(instance.property),
                 'interaction_type': instance.interaction_type
             }
@@ -109,20 +123,24 @@ def property_interest_post_save(sender, instance, created, **kwargs):
             # Notify agent
             if instance.property.agent:
                 Notification.objects.create(
-                    recipient=instance.property.agent,
-                    type='NEW_PROPERTY_INTEREST',
+                    recipient_type='user',
+                    recipient_id=str(instance.property.agent.id),
+                    channel='in_app',
+                    priority='high',
                     title='Nouveau intérêt pour votre propriété',
                     message=f'{instance.client.get_full_name()} s\'intéresse à "{instance.property.title}".',
-                    created_at=timezone.now()
+                    metadata={'type': 'NEW_PROPERTY_INTEREST', 'property_id': str(instance.property.id)}
                 )
             
             # Notify client
             Notification.objects.create(
-                recipient=instance.client,
-                type='INTEREST_RECORDED',
+                recipient_type='user',
+                recipient_id=str(instance.client.id),
+                channel='in_app',
+                priority='normal',
                 title='Intérêt enregistré',
                 message=f'Votre intérêt pour "{instance.property.title}" a été enregistré.',
-                created_at=timezone.now()
+                metadata={'type': 'INTEREST_RECORDED', 'property_id': str(instance.property.id)}
             )
     
     else:
@@ -138,10 +156,12 @@ def property_interest_post_save(sender, instance, created, **kwargs):
         if old_instance.status != instance.status:
             ActivityLog.objects.create(
                 user=instance.client,
+                component='properties',
                 action='PROPERTY_INTEREST_UPDATED',
-                content_type=ContentType.objects.get_for_model(instance),
-                object_id=instance.id,
-                changes={
+                message=f'Property interest status changed from {old_instance.status} to {instance.status}',
+                metadata={
+                    'content_type': 'PropertyInterest',
+                    'object_id': str(instance.id),
                     'old_status': old_instance.status,
                     'new_status': instance.status
                 }
@@ -159,10 +179,12 @@ def client_interaction_post_save(sender, instance, created, **kwargs):
         # Log interaction creation
         ActivityLog.objects.create(
             user=instance.agent,
+            component='clients',
             action='CLIENT_INTERACTION_CREATED',
-            content_type=ContentType.objects.get_for_model(instance),
-            object_id=instance.id,
-            changes={
+            message=f'Interaction created with {instance.client.get_full_name()}',
+            metadata={
+                'content_type': 'ClientInteraction',
+                'object_id': str(instance.id),
                 'client': str(instance.client),
                 'interaction_type': instance.interaction_type
             }
@@ -170,25 +192,31 @@ def client_interaction_post_save(sender, instance, created, **kwargs):
         
         # Send reminder notifications
         if instance.scheduled_date and instance.scheduled_date > timezone.now():
-            # Schedule reminder 1 hour before
-            reminder_time = instance.scheduled_date - timezone.timedelta(hours=1)
-            if reminder_time > timezone.now():
-                Notification.objects.create(
-                    recipient=instance.agent,
-                    type='INTERACTION_REMINDER',
-                    title='Rappel : Interaction programmée',
-                    message=f'Rappel : Interaction avec {instance.client.get_full_name()} à {instance.scheduled_date}.',
-                    created_at=reminder_time
-                )
+            # Schedule reminder 1 hour before (Note: created_at cannot be in future, store in metadata)
+            Notification.objects.create(
+                recipient_type='user',
+                recipient_id=str(instance.agent.id),
+                channel='in_app',
+                priority='high',
+                title='Rappel : Interaction programmée',
+                message=f'Rappel : Interaction avec {instance.client.get_full_name()} à {instance.scheduled_date}.',
+                metadata={
+                    'type': 'INTERACTION_REMINDER',
+                    'scheduled_for': str(instance.scheduled_date),
+                    'interaction_id': str(instance.id)
+                }
+            )
         
         # Notify client of scheduled interaction
         if instance.status == 'scheduled':
             Notification.objects.create(
-                recipient=instance.client,
-                type='INTERACTION_SCHEDULED',
+                recipient_type='user',
+                recipient_id=str(instance.client.id),
+                channel='in_app',
+                priority='normal',
                 title='Interaction programmée',
                 message=f'Votre {instance.get_interaction_type_display()} est programmé(e) pour le {instance.scheduled_date}.',
-                created_at=timezone.now()
+                metadata={'type': 'INTERACTION_SCHEDULED', 'interaction_id': str(instance.id)}
             )
     
     else:
@@ -204,10 +232,12 @@ def client_interaction_post_save(sender, instance, created, **kwargs):
         if old_instance.status != instance.status:
             ActivityLog.objects.create(
                 user=instance.agent,
+                component='clients',
                 action='CLIENT_INTERACTION_UPDATED',
-                content_type=ContentType.objects.get_for_model(instance),
-                object_id=instance.id,
-                changes={
+                message=f'Interaction status changed from {old_instance.status} to {instance.status}',
+                metadata={
+                    'content_type': 'ClientInteraction',
+                    'object_id': str(instance.id),
                     'old_status': old_instance.status,
                     'new_status': instance.status
                 }
@@ -217,21 +247,25 @@ def client_interaction_post_save(sender, instance, created, **kwargs):
             if instance.status == 'completed':
                 # Send summary to client
                 Notification.objects.create(
-                    recipient=instance.client,
-                    type='INTERACTION_COMPLETED',
+                    recipient_type='user',
+                    recipient_id=str(instance.client.id),
+                    channel='in_app',
+                    priority='normal',
                     title='Interaction terminée',
                     message=f'Votre {instance.get_interaction_type_display()} a été terminé(e). Merci !',
-                    created_at=timezone.now()
+                    metadata={'type': 'INTERACTION_COMPLETED', 'interaction_id': str(instance.id)}
                 )
             
             elif instance.status == 'cancelled':
                 # Notify client of cancellation
                 Notification.objects.create(
-                    recipient=instance.client,
-                    type='INTERACTION_CANCELLED',
+                    recipient_type='user',
+                    recipient_id=str(instance.client.id),
+                    channel='in_app',
+                    priority='normal',
                     title='Interaction annulée',
                     message=f'Votre {instance.get_interaction_type_display()} a été annulé(e).',
-                    created_at=timezone.now()
+                    metadata={'type': 'INTERACTION_CANCELLED', 'interaction_id': str(instance.id)}
                 )
         
         # Handle follow-up scheduling
@@ -239,11 +273,17 @@ def client_interaction_post_save(sender, instance, created, **kwargs):
             # Schedule follow-up reminder
             if instance.follow_up_date:
                 Notification.objects.create(
-                    recipient=instance.agent,
-                    type='FOLLOW_UP_SCHEDULED',
+                    recipient_type='user',
+                    recipient_id=str(instance.agent.id),
+                    channel='in_app',
+                    priority='high',
                     title='Suivi programmé',
                     message=f'N\'oubliez pas le suivi avec {instance.client.get_full_name()} le {instance.follow_up_date}.',
-                    created_at=instance.follow_up_date
+                    metadata={
+                        'type': 'FOLLOW_UP_SCHEDULED',
+                        'follow_up_date': str(instance.follow_up_date),
+                        'interaction_id': str(instance.id)
+                    }
                 )
 
 
@@ -258,11 +298,13 @@ def lead_post_save(sender, instance, created, **kwargs):
         # Log lead creation
         ActivityLog.objects.create(
             user=instance.assigned_agent or instance.agency.users.filter(role='admin').first(),
+            component='clients',
             action='LEAD_CREATED',
-            content_type=ContentType.objects.get_for_model(instance),
-            object_id=instance.id,
-            changes={
-                'name': instance.full_name,
+            message=f'New lead created: {instance.full_name()}',
+            metadata={
+                'content_type': 'Lead',
+                'object_id': str(instance.id),
+                'name': instance.full_name(),
                 'email': instance.email,
                 'source': instance.source
             }
@@ -277,11 +319,13 @@ def lead_post_save(sender, instance, created, **kwargs):
             admin_users = instance.agency.users.filter(role='admin')
             for admin_user in admin_users:
                 Notification.objects.create(
-                    recipient=admin_user,
-                    type='NEW_LEAD_UNASSIGNED',
+                    recipient_type='user',
+                    recipient_id=str(admin_user.id),
+                    channel='in_app',
+                    priority='high',
                     title='Nouveau lead non assigné',
-                    message=f'Nouveau lead de {instance.full_name} ({instance.email}) nécessite une attribution.',
-                    created_at=timezone.now()
+                    message=f'Nouveau lead de {instance.full_name()} ({instance.email}) nécessite une attribution.',
+                    metadata={'type': 'NEW_LEAD_UNASSIGNED', 'lead_id': str(instance.id)}
                 )
     
     else:
@@ -317,10 +361,14 @@ def lead_post_save(sender, instance, created, **kwargs):
         if changes:
             ActivityLog.objects.create(
                 user=instance.assigned_agent or instance.agency.users.filter(role='admin').first(),
+                component='clients',
                 action='LEAD_UPDATED',
-                content_type=ContentType.objects.get_for_model(instance),
-                object_id=instance.id,
-                changes=changes
+                message=f'Lead updated: {instance.full_name()}',
+                metadata={
+                    'content_type': 'Lead',
+                    'object_id': str(instance.id),
+                    'changes': changes
+                }
             )
             
             # Handle conversion
@@ -328,10 +376,14 @@ def lead_post_save(sender, instance, created, **kwargs):
                 # Log conversion
                 ActivityLog.objects.create(
                     user=instance.assigned_agent or instance.agency.users.filter(role='admin').first(),
+                    component='clients',
                     action='LEAD_CONVERTED',
-                    content_type=ContentType.objects.get_for_model(instance),
-                    object_id=instance.id,
-                    changes={'conversion_date': instance.conversion_date}
+                    message=f'Lead converted to client: {instance.full_name()}',
+                    metadata={
+                        'content_type': 'Lead',
+                        'object_id': str(instance.id),
+                        'conversion_date': str(instance.conversion_date) if instance.conversion_date else None
+                    }
                 )
 
 

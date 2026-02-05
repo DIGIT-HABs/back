@@ -130,6 +130,13 @@ class ClientProfile(models.Model):
     total_inquiries_made = models.IntegerField(default=0)
     conversion_score = models.IntegerField(default=0, validators=[MinValueValidator(0), MaxValueValidator(100)])
     
+    # Tags & Organization (Phase 1)
+    tags = models.JSONField(
+        default=list,
+        blank=True,
+        help_text="Tags pour catégoriser le client (ex: ['vip', 'investisseur', 'premier_achat'])"
+    )
+    
     # Dates
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -595,3 +602,66 @@ class Lead(models.Model):
             object_id=self.id,
             changes={'assigned_to': str(agent)}
         )
+    
+    def __str__(self):
+        return f"Lead: {self.client.get_full_name() if self.client else self.email}"
+
+
+class ClientNote(models.Model):
+    """
+    Private notes about clients (for agents only).
+    Added in Phase 1 - Post-deployment.
+    """
+    
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    client_profile = models.ForeignKey(
+        ClientProfile,
+        on_delete=models.CASCADE,
+        related_name='notes'
+    )
+    author = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='client_notes_written',
+        help_text='Agent qui a écrit la note'
+    )
+    
+    # Note Content
+    title = models.CharField(max_length=200, blank=True)
+    content = models.TextField()
+    
+    # Note Type
+    note_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('general', 'Général'),
+            ('meeting', 'Compte-rendu réunion'),
+            ('call', 'Appel téléphonique'),
+            ('follow_up', 'Suivi'),
+            ('alert', 'Alerte'),
+            ('opportunity', 'Opportunité'),
+        ],
+        default='general'
+    )
+    
+    # Priority
+    is_important = models.BooleanField(default=False)
+    is_pinned = models.BooleanField(default=False)
+    
+    # Reminder
+    reminder_date = models.DateTimeField(null=True, blank=True)
+    reminder_sent = models.BooleanField(default=False)
+    
+    # Metadata
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['-is_pinned', '-is_important', '-created_at']
+        indexes = [
+            models.Index(fields=['client_profile', '-created_at']),
+            models.Index(fields=['author', '-created_at']),
+        ]
+    
+    def __str__(self):
+        return f"Note sur {self.client_profile.user.get_full_name()} par {self.author.get_full_name()}"

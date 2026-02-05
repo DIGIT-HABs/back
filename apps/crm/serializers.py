@@ -7,8 +7,12 @@ from django.utils import timezone
 from django.contrib.contenttypes.models import ContentType
 from apps.auth.models import User, Agency
 from apps.properties.models import Property
-from .models import ClientProfile, PropertyInterest, ClientInteraction, Lead
+from .models import ClientProfile, PropertyInterest, ClientInteraction, Lead, ClientNote
 from .matching import PropertyMatcher
+
+
+# Import for PropertyListSerializer
+from apps.properties.serializers import PropertyListSerializer
 
 
 class ClientProfileSerializer(serializers.ModelSerializer):
@@ -34,7 +38,8 @@ class ClientProfileSerializer(serializers.ModelSerializer):
             'preferred_cities', 'max_distance_from_center',
             'financing_status', 'credit_score_range',
             'must_have_features', 'deal_breakers', 'lifestyle_notes',
-            'status', 'priority_level', 'last_property_view', 'total_properties_viewed',
+            'status', 'priority_level', 'tags',
+            'last_property_view', 'total_properties_viewed',
             'total_inquiries_made', 'conversion_score', 'conversion_score_display',
             'created_at', 'updated_at', 'matching_properties'
         ]
@@ -347,3 +352,54 @@ class AgentDashboardSerializer(serializers.Serializer):
     upcoming_visits = serializers.ListField()
     recent_interactions = serializers.ListField()
     performance_stats = serializers.DictField()
+
+
+class ClientNoteSerializer(serializers.ModelSerializer):
+    """
+    Serializer for client notes (Phase 1 - Post-deployment).
+    """
+    
+    author_name = serializers.CharField(source='author.get_full_name', read_only=True)
+    client_name = serializers.CharField(source='client_profile.user.get_full_name', read_only=True)
+    is_author = serializers.SerializerMethodField()
+    
+    class Meta:
+        model = ClientNote
+        fields = [
+            'id', 'client_profile', 'author', 'author_name', 'client_name',
+            'title', 'content', 'note_type',
+            'is_important', 'is_pinned',
+            'reminder_date', 'reminder_sent',
+            'created_at', 'updated_at', 'is_author',
+        ]
+        read_only_fields = ['id', 'author', 'reminder_sent', 'created_at', 'updated_at']
+    
+    def get_is_author(self, obj):
+        """Check if current user is the author."""
+        request = self.context.get('request')
+        if request and request.user.is_authenticated:
+            return obj.author == request.user
+        return False
+    
+    def create(self, validated_data):
+        """Auto-set author from request."""
+        request = self.context.get('request')
+        validated_data['author'] = request.user
+        return super().create(validated_data)
+
+
+class ClientNoteCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating client notes."""
+    
+    class Meta:
+        model = ClientNote
+        fields = [
+            'client_profile', 'title', 'content', 'note_type',
+            'is_important', 'is_pinned', 'reminder_date',
+        ]
+    
+    def create(self, validated_data):
+        """Auto-set author from request."""
+        request = self.context.get('request')
+        validated_data['author'] = request.user
+        return super().create(validated_data)

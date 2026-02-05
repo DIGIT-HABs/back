@@ -6,7 +6,8 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     ClientProfileViewSet, PropertyInterestViewSet, ClientInteractionViewSet,
-    LeadViewSet, PropertyMatchingViewSet, DashboardViewSet
+    LeadViewSet, PropertyMatchingViewSet, DashboardViewSet, ClientNoteViewSet,
+    ReportingViewSet
 )
 
 # Create router and register viewsets
@@ -17,6 +18,8 @@ router.register(r'interactions', ClientInteractionViewSet, basename='clientinter
 router.register(r'leads', LeadViewSet, basename='lead')
 router.register(r'matching', PropertyMatchingViewSet, basename='propertmatching')
 router.register(r'dashboard', DashboardViewSet, basename='dashboard')
+router.register(r'notes', ClientNoteViewSet, basename='clientnote')
+router.register(r'reports', ReportingViewSet, basename='reporting')
 
 # URL patterns
 urlpatterns = [
