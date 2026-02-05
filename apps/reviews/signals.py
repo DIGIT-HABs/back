@@ -63,11 +63,12 @@ def review_response_added(sender, instance, **kwargs):
     Notify author when agent responds to their review.
     """
     if instance.response and instance.response_date:
+        agent_name = instance.response_by.get_full_name() if instance.response_by else "L'agent"
         NotificationService.create_notification(
             recipient_ids=[str(instance.author.id)],
             notification_type='review_response',
             title='Réponse à votre avis',
-            message=f"{instance.response_by.get_full_name() if instance.response_by else 'L\'agent'} a répondu à votre avis.",
+            message=f"{agent_name} a répondu à votre avis.",
             variables={
                 'review_id': str(instance.id),
             }
