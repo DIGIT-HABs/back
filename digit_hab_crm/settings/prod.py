@@ -7,11 +7,20 @@ import os
 
 # Basic production settings
 DEBUG = False
-ALLOWED_HOSTS = ['your-domain.com', 'www.your-domain.com', os.environ.get('ALLOWED_HOSTS', '').split(',')]
+
+# Allowed Hosts - from environment variable or defaults
+allowed_hosts_env = os.environ.get('ALLOWED_HOSTS', '')
+ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_env.split(',') if host.strip()] or [
+    'digit-hab.altoppe.sn',
+    'api.digit-hab.altoppe.sn',
+    'localhost',
+    '127.0.0.1',
+]
 
 # Security settings
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-SECURE_SSL_REDIRECT = True
+# Nginx handles SSL redirect, so we disable it in Django to avoid loops
+SECURE_SSL_REDIRECT = False
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
@@ -24,10 +33,29 @@ CSRF_COOKIE_SECURE = True
 CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SAMESITE = 'Lax'
 
+# CSRF Trusted Origins for HTTPS
+CSRF_TRUSTED_ORIGINS = [
+    'https://digit-hab.altoppe.sn',
+    'https://api.digit-hab.altoppe.sn',
+]
+
 # Content Security Policy
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_BROWSER_XSS_FILTER = True
 X_FRAME_OPTIONS = 'DENY'
+
+# Database - Production (PostgreSQL with PostGIS)
+# DATABASES = {
+#     'default': {
+#         'ENGINE': os.environ.get('DB_ENGINE', 'django.db.backends.postgresql'),
+#         'NAME': os.environ.get('DB_NAME', 'digit_hab_crm_prod'),
+#         'USER': os.environ.get('DB_USER', 'postgres'),
+#         'PASSWORD': os.environ.get('DB_PASSWORD'),
+#         'HOST': os.environ.get('DB_HOST', 'db'),
+#         'PORT': os.environ.get('DB_PORT', '5432'),
+#         'CONN_MAX_AGE': 60,
+#     }
+# }
 
 # sqlite
 DATABASES = {
@@ -37,22 +65,6 @@ DATABASES = {
     }
 }
 
-# # Database - Production
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.contrib.gis.db.backends.postgis',
-        'NAME': os.environ.get('DB_NAME', 'digit_hab_crm_prod'),
-        'USER': os.environ.get('DB_USER', 'postgres'),
-        'PASSWORD': os.environ.get('DB_PASSWORD'),
-        'HOST': os.environ.get('DB_HOST', 'localhost'),
-        'PORT': os.environ.get('DB_PORT', '5432'),
-        'OPTIONS': {
-            'charset': 'utf8',
-            'sslmode': 'require',
-        },
-        'CONN_MAX_AGE': 60,
-    }
-}
 
 # Email backend for production
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
@@ -75,21 +87,23 @@ CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOWED_ORIGINS = [
     'https://api.digit-hab.altoppe.sn',
     'https://www.your-domain.com',
+    'http://localhost:8000',
+    'http://127.0.0.1:8000',
 ]
 
 # Logging for production
 LOGGING['loggers']['django']['level'] = 'INFO'
 LOGGING['loggers']['digit_hab_crm']['level'] = 'INFO'
-LOGGING['handlers']['file']['filename'] = '/var/log/digit_hab_crm/digit_hab_crm.log'
+# Use console logging in Docker
+LOGGING['handlers']['console']['level'] = 'INFO'
 
 # Static files for production
 STATIC_URL = '/static/'
-STATIC_ROOT = '/var/www/digit-hab-crm/static/'
-STATICFILES_DIRS = [BASE_DIR / 'static']
+STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Media files for production
 MEDIA_URL = '/media/'
-MEDIA_ROOT = '/var/www/digit-hab-crm/media/'
+MEDIA_ROOT = BASE_DIR / 'media'
 
 # Performance optimization
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5MB
