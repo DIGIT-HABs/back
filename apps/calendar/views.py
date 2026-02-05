@@ -244,13 +244,13 @@ class ClientAvailabilityViewSet(viewsets.ModelViewSet):
         
         # Agents peuvent voir les disponibilités de leurs clients
         try:
-            if hasattr(user, 'profile') and user.profile:
-                if user.profile.role in ['agent', 'manager', 'admin']:
-                    # Retourner les disponibilités des clients assignés
-                    return ClientAvailability.objects.filter(
-                        user__profile__assigned_agent=user
-                    ).select_related('user')
-        except AttributeError:
+            profile = getattr(user, 'profile', None)
+            if profile and getattr(profile, 'role', None) in ['agent', 'manager', 'admin']:
+                # Retourner les disponibilités des clients assignés
+                return ClientAvailability.objects.filter(
+                    user__profile__assigned_agent=user
+                ).select_related('user')
+        except (AttributeError, Exception):
             pass
         
         return ClientAvailability.objects.filter(user=user).select_related('user')
@@ -302,10 +302,10 @@ class VisitScheduleViewSet(viewsets.ModelViewSet):
         
         # Les agents voient leurs propres planifications
         try:
-            if hasattr(user, 'profile') and user.profile:
-                if user.profile.role in ['agent', 'manager', 'admin']:
-                    return queryset.filter(agent=user)
-        except AttributeError:
+            profile = getattr(user, 'profile', None)
+            if profile and getattr(profile, 'role', None) in ['agent', 'manager', 'admin']:
+                return queryset.filter(agent=user)
+        except (AttributeError, Exception):
             pass
         
         # Les clients voient leurs propres planifications

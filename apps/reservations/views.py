@@ -72,7 +72,7 @@ class ReservationViewSet(viewsets.ModelViewSet):
         
         # Agents see reservations for their agency
         if user.role in ['agent', 'manager']:
-            user_agency = getattr(user.profile, 'agency', None)
+            user_agency = getattr(getattr(user, 'profile', None), 'agency', None)
             if user_agency:
                 return Reservation.objects.filter(
                     property__agency=user_agency
@@ -385,7 +385,7 @@ class PaymentViewSet(viewsets.ModelViewSet):
         
         # Agents see payments for their agency's reservations
         if user.role in ['agent', 'manager']:
-            user_agency = getattr(user.profile, 'agency', None)
+            user_agency = getattr(getattr(user, 'profile', None), 'agency', None)
             if user_agency:
                 return Payment.objects.filter(
                     reservation__property__agency=user_agency
