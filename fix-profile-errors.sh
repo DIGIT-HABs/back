@@ -14,7 +14,7 @@ cd /var/www/digit-hab-crm
 # 1. Créer les profils manquants pour tous les utilisateurs
 echo "👤 Création des profils manquants..."
 docker compose -f docker-compose.prod.yml exec -T web python << 'PYTHON_EOF'
-from apps.custom_auth.models import User, UserProfile
+from apps.auth.models import User, UserProfile
 
 # Créer un profil pour chaque utilisateur qui n'en a pas
 users_without_profile = []
