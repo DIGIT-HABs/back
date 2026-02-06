@@ -84,10 +84,11 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 # Logging for production
-LOGGING['loggers']['django']['level'] = 'INFO'
-LOGGING['loggers']['digit_hab_crm']['level'] = 'INFO'
-# Use console logging in Docker
-LOGGING['handlers']['console']['level'] = 'INFO'
+# Override logging levels if needed
+if 'loggers' in LOGGING and 'django' in LOGGING['loggers']:
+    LOGGING['loggers']['django']['level'] = 'INFO'
+if 'handlers' in LOGGING and 'console' in LOGGING['handlers']:
+    LOGGING['handlers']['console']['level'] = 'INFO'
 
 # Static files for production
 STATIC_URL = '/static/'
