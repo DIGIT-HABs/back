@@ -5,7 +5,7 @@ on:
     branches:
       - main
     paths:
-      - 'Django/**'
+      - '**'
       - '.github/workflows/deploy.yml'
   workflow_dispatch:  # Permet le déclenchement manuel
 
