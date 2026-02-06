@@ -85,7 +85,12 @@ CORS_ALLOWED_ORIGINS = [
 
 # Logging for production
 # Override logging levels if needed
-
+# Override Cache - Désactiver Redis temporairement
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.dummy.DummyCache',
+    }
+}
 
 # Static files for production
 STATIC_URL = '/static/'
