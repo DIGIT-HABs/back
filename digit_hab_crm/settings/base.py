@@ -442,24 +442,8 @@ DEFAULT_LONGITUDE = 2.3522
 # PERFORMANCE SETTINGS
 # ============================================================================
 
-# Cache settings for calendar and notifications
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.redis.RedisCache' if not DEBUG else 'django.core.cache.backends.filebased.FileBasedCache',
-        'LOCATION': 'redis://127.0.0.1:6379/1' if not DEBUG else 'C:/temp/digit_hab_cache',
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-        } if not DEBUG else {
-            'LOCATION': 'C:/temp/digit_hab_cache',
-        },
-        'KEY_PREFIX': 'digit_hab',
-        'TIMEOUT': 300,  # 5 minutes
-    }
-}
-
-# Session cache
-SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
-SESSION_CACHE_ALIAS = 'default'
+# Cache settings are defined earlier in this file (line ~242)
+# Do not redefine CACHES here to avoid conflicts
 
 # ============================================================================
 # LOGGING CONFIGURATION
