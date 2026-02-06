@@ -23,8 +23,10 @@ services:
   web:
     build: .
     environment:
+      - DJANGO_SETTINGS_MODULE=digit_hab_crm.settings.prod
       - DEBUG=False
       - SECRET_KEY=${SECRET_KEY}
+      - DB_ENGINE=django.db.backends.postgresql
       - DB_NAME=${DB_NAME:-digit_hab_crm_prod}
       - DB_USER=${DB_USER:-digit_hab_crm_user}
       - DB_PASSWORD=${DB_PASSWORD}
@@ -48,6 +50,7 @@ services:
   celery-worker:
     build: .
     environment:
+      - DJANGO_SETTINGS_MODULE=digit_hab_crm.settings.prod
       - DEBUG=False
       - SECRET_KEY=${SECRET_KEY}
       - DB_NAME=${DB_NAME:-digit_hab_crm_prod}
@@ -73,6 +76,7 @@ services:
   celery-beat:
     build: .
     environment:
+      - DJANGO_SETTINGS_MODULE=digit_hab_crm.settings.prod
       - DEBUG=False
       - SECRET_KEY=${SECRET_KEY}
       - DB_NAME=${DB_NAME:-digit_hab_crm_prod}

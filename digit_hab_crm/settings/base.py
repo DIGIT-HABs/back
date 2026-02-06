@@ -86,15 +86,8 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'digit_hab_crm.wsgi.application'
 
-# Sqlite
-
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'base.db',
-    }
-}
-
+# Database configuration is defined in dev.py or prod.py
+# Do not define DATABASES here in base.py
 
 # # Database
 # DATABASES = {
