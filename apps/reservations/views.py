@@ -7,8 +7,8 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django_filters.rest_framework import DjangoFilterBackend
-from django.db import transaction
-from django.db.models import Q
+from django.db import transaction, models
+from django.db.models import Q, Count, Sum, Avg
 from django.utils import timezone
 from django.shortcuts import get_object_or_404
 from apps.auth.models import User
@@ -260,9 +260,9 @@ class ReservationViewSet(viewsets.ModelViewSet):
         serializer = ReservationActivitySerializer(activities, many=True)
         return Response(serializer.data)
     
-    @action(detail=False, methods=['get'], permission_classes=[CanManageReservations])
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated])
     def stats(self, request):
-        """Get reservation statistics."""
+        """Get reservation statistics. Returns stats based on user's permissions."""
         queryset = self.get_queryset()
         
         # Calculate statistics
