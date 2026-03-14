@@ -4,6 +4,7 @@ import django
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'digit_hab_crm.settings')
 django.setup()
 
+
 from django.contrib.auth import get_user_model
 from apps.crm.models import ClientProfile, ClientNote
 from apps.crm.serializers import ClientProfileSerializer

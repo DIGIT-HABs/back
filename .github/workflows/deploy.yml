@@ -1,0 +1,110 @@
+name: 🚀 Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '**'
+      - '.github/workflows/deploy.yml'
+  workflow_dispatch:  # Permet le déclenchement manuel
+
+jobs:
+  deploy:
+    name: Deploy to Production Server
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      
+      - name: 📊 Get commit info
+        id: commit
+        run: |
+          echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+          echo "message=$(git log -1 --pretty=%B)" >> $GITHUB_OUTPUT
+          echo "author=$(git log -1 --pretty=%an)" >> $GITHUB_OUTPUT
+      
+      - name: 🔐 Setup SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+      
+      - name: 📝 Add server to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SERVER_HOST }} >> ~/.ssh/known_hosts
+      
+      - name: 🚀 Deploy to server
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+          PROJECT_DIR: /var/www/digit-hab-crm
+        run: |
+          ssh $SERVER_USER@$SERVER_HOST << 'ENDSSH'
+            set -e
+            
+            echo "🔄 Starting deployment..."
+            cd $PROJECT_DIR
+            
+            # Execute deployment script
+            chmod +x Django/deploy-final.sh
+            ./Django/deploy-final.sh
+            
+            echo "✅ Deployment completed!"
+          ENDSSH
+      
+      - name: 🏥 Health Check
+        env:
+          HEALTH_URL: ${{ secrets.HEALTH_CHECK_URL }}
+        run: |
+          echo "Checking application health..."
+          sleep 10
+          
+          response=$(curl -s -o /dev/null -w "%{http_code}" $HEALTH_URL || echo "000")
+          
+          if [ "$response" = "200" ]; then
+            echo "✅ Health check passed (HTTP $response)"
+          else
+            echo "⚠️ Health check returned HTTP $response"
+            echo "Note: Application might still be starting up"
+          fi
+      
+      - name: 📊 Deployment Summary
+        if: always()
+        run: |
+          echo "## 🚀 Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ steps.commit.outputs.sha_short }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Author**: ${{ steps.commit.outputs.author }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Branch**: main" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📝 Commit Message" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.commit.outputs.message }}" >> $GITHUB_STEP_SUMMARY
+      
+      - name: 💬 Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '❌ 🔴 Deployment failed! Check the [workflow run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for details.'
+            })
+
+  notify-success:
+    name: Send Success Notification
+    needs: deploy
+    runs-on: ubuntu-latest
+    if: success()
+    
+    steps:
+      - name: 🎉 Deployment successful
+        run: |
+          echo "✅ Deployment to production completed successfully!"
+          echo "🌐 Application URL: https://api.digit-hab.altoppe.sn"
