@@ -579,6 +579,9 @@ class ReservationActivity(models.Model):
             ('agent_assigned', 'Agent assigné'),
             ('notes_added', 'Notes ajoutées'),
             ('follow_up_scheduled', 'Suivi programmé'),
+            ('contract_created', 'Contrat créé'),
+            ('contract_sent', 'Contrat envoyé'),
+            ('contract_signed', 'Contrat signé'),
         ]
     )
     
@@ -615,3 +618,156 @@ class ReservationActivity(models.Model):
     
     def __str__(self):
         return f"{self.reservation} - {self.get_activity_type_display()} - {self.created_at}"
+
+
+class ContractTemplate(models.Model):
+    """
+    Template for generating contracts (sale or rent).
+    Body can contain placeholders: {{client_name}}, {{property_title}}, {{amount}}, etc.
+    """
+    name = models.CharField(max_length=200)
+    contract_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('sale', 'Vente'),
+            ('rent', 'Location'),
+        ],
+        default='sale'
+    )
+    body = models.TextField(
+        help_text="Contenu du contrat. Placeholders: {{client_name}}, {{property_title}}, {{amount}}, {{scheduled_date}}, etc."
+    )
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'contract_templates'
+        verbose_name = 'Modèle de contrat'
+        verbose_name_plural = 'Modèles de contrat'
+        ordering = ['contract_type', 'name']
+
+    def __str__(self):
+        return f"{self.name} ({self.get_contract_type_display()})"
+
+
+class Contract(models.Model):
+    """
+    Contract linked to a reservation. Flow: draft → sent → signed.
+    When signed: reservation is completed and property status updated (sold/rented).
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    reservation = models.OneToOneField(
+        Reservation,
+        on_delete=models.CASCADE,
+        related_name='contract'
+    )
+    contract_type = models.CharField(
+        max_length=20,
+        choices=[
+            ('sale', 'Vente'),
+            ('rent', 'Location'),
+        ],
+        default='sale'
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=[
+            ('draft', 'Brouillon'),
+            ('sent', 'Envoyé au client'),
+            ('signed', 'Signé'),
+            ('archived', 'Archivé'),
+        ],
+        default='draft'
+    )
+    template = models.ForeignKey(
+        ContractTemplate,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='contracts'
+    )
+    # Document: uploaded by agent or generated from template
+    document = models.FileField(
+        upload_to='contracts/documents/%Y/%m/',
+        null=True,
+        blank=True,
+        max_length=500
+    )
+    # Signed document (uploaded after client signature)
+    signed_document = models.FileField(
+        upload_to='contracts/signed/%Y/%m/',
+        null=True,
+        blank=True,
+        max_length=500
+    )
+    sent_at = models.DateTimeField(null=True, blank=True)
+    signed_at = models.DateTimeField(null=True, blank=True)
+    signed_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='signed_contracts'
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='created_contracts'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    notes = models.TextField(blank=True)
+    # QR code verification: code unique pour scan + authentification
+    verification_code = models.CharField(
+        max_length=32,
+        unique=True,
+        null=True,
+        blank=True,
+        db_index=True,
+        help_text="Code unique pour vérification du contrat (QR code)"
+    )
+    viewed_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        help_text="Date de première consultation du contrat (scan QR ou validation)"
+    )
+
+    class Meta:
+        db_table = 'contracts'
+        verbose_name = 'Contrat'
+        verbose_name_plural = 'Contrats'
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['reservation']),
+            models.Index(fields=['status']),
+            models.Index(fields=['contract_type']),
+            models.Index(fields=['verification_code']),
+        ]
+
+    def __str__(self):
+        return f"Contrat {self.reservation} - {self.get_status_display()}"
+
+    def ensure_verification_code(self):
+        """Generate a unique verification code if not set."""
+        if self.verification_code:
+            return
+        import secrets
+        self.verification_code = secrets.token_urlsafe(16)[:22]  # ~22 chars URL-safe
+        self.save(update_fields=['verification_code', 'updated_at'])
+
+    def can_be_edited(self):
+        return self.status == 'draft'
+
+    def mark_sent(self):
+        self.status = 'sent'
+        self.sent_at = timezone.now()
+        self.save(update_fields=['status', 'sent_at', 'updated_at'])
+
+    def mark_signed(self, user=None):
+        self.status = 'signed'
+        self.signed_at = timezone.now()
+        self.signed_by = user
+        self.save(update_fields=['status', 'signed_at', 'signed_by', 'updated_at'])

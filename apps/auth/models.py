@@ -168,6 +168,7 @@ class Agency(models.Model):
     email = models.EmailField()
     phone = models.CharField(max_length=20)
     website = models.URLField(blank=True)
+    logo = models.ImageField(upload_to='agencies/logos/', blank=True, null=True)
     
     # Address
     address_line1 = models.CharField(max_length=200)
@@ -230,9 +231,11 @@ class Agency(models.Model):
         return max(0, remaining)
     
     def can_add_agent(self):
-        """Check if agency can add more agents."""
-        from django.apps import apps
-        return self.user_set.count() < self.max_agents
+        """Check if agency can add more agents (ne compte que les utilisateurs avec role=agent)."""
+        from django.contrib.auth import get_user_model
+        UserModel = get_user_model()
+        agent_count = UserModel.objects.filter(profile__agency=self, role='agent').count()
+        return agent_count < self.max_agents
     
     def can_add_property(self):
         """Check if agency can add more properties."""

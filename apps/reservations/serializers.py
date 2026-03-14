@@ -8,7 +8,7 @@ from django.core.exceptions import ValidationError
 from apps.auth.models import User
 from apps.properties.models import Property
 from apps.crm.models import ClientProfile
-from .models import Reservation, Payment, ReservationActivity
+from .models import Reservation, Payment, ReservationActivity, Contract, ContractTemplate
 
 
 class PropertySummarySerializer(serializers.ModelSerializer):
@@ -84,6 +84,13 @@ class ReservationActivitySerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at']
 
 
+class ContractSummarySerializer(serializers.ModelSerializer):
+    """Minimal contract info for nesting in reservation."""
+    class Meta:
+        model = Contract
+        fields = ['id', 'status', 'contract_type', 'document', 'sent_at', 'signed_at', 'verification_code', 'viewed_at']
+
+
 class ReservationSerializer(serializers.ModelSerializer):
     """Serializer for reservation management."""
     
@@ -120,6 +127,7 @@ class ReservationSerializer(serializers.ModelSerializer):
     
     # Payment information
     payments = PaymentSerializer(many=True, read_only=True)
+    contract = serializers.SerializerMethodField()
     payment_status_display = serializers.CharField(
         source='get_payment_status_display',
         read_only=True
@@ -168,7 +176,7 @@ class ReservationSerializer(serializers.ModelSerializer):
             'is_expired', 'is_stay_ended', 'can_be_cancelled', 'can_be_confirmed',
             
             # Related data
-            'payments',
+            'payments', 'contract',
             
             # Metadata
             'created_at', 'updated_at', 'created_by', 'created_by_name',
@@ -184,8 +192,16 @@ class ReservationSerializer(serializers.ModelSerializer):
         if primary_image:
             return primary_image.image.url
         first_image = obj.property.images.first()
-        return first_image.image.url if first_image else None   
-    
+        return first_image.image.url if first_image else None
+
+    def get_contract(self, obj):
+        """Return contract summary if the reservation has a contract."""
+        try:
+            c = obj.contract
+            return ContractSummarySerializer(c).data
+        except Contract.DoesNotExist:
+            return None
+
     def get_can_be_cancelled(self, obj):
         """Check if reservation can be cancelled."""
         request = self.context.get('request')
@@ -414,3 +430,83 @@ class ReservationStatsSerializer(serializers.Serializer):
     total_revenue = serializers.DecimalField(max_digits=12, decimal_places=2)
     avg_booking_value = serializers.DecimalField(max_digits=12, decimal_places=2)
     conversion_rate = serializers.FloatField()
+
+
+# --- Contract ---
+
+class ContractTemplateSerializer(serializers.ModelSerializer):
+    """Serializer for contract templates (list/detail)."""
+    
+    class Meta:
+        model = ContractTemplate
+        fields = ['id', 'name', 'contract_type', 'body', 'is_active', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class ContractSerializer(serializers.ModelSerializer):
+    """Serializer for contract list/detail."""
+    
+    reservation_id = serializers.UUIDField(source='reservation.id', read_only=True)
+    created_by_name = serializers.CharField(source='created_by.get_full_name', read_only=True)
+    signed_by_name = serializers.CharField(source='signed_by.get_full_name', read_only=True)
+    can_be_edited = serializers.BooleanField(read_only=True)
+    
+    class Meta:
+        model = Contract
+        fields = [
+            'id', 'reservation', 'reservation_id', 'contract_type', 'status',
+            'template', 'document', 'signed_document',
+            'sent_at', 'signed_at', 'signed_by', 'signed_by_name',
+            'created_by', 'created_by_name', 'created_at', 'updated_at', 'notes',
+            'can_be_edited', 'verification_code', 'viewed_at'
+        ]
+        read_only_fields = [
+            'id', 'reservation', 'sent_at', 'signed_at', 'signed_by', 'created_at', 'updated_at',
+            'verification_code', 'viewed_at'
+        ]
+
+
+class ContractCreateSerializer(serializers.ModelSerializer):
+    """Serializer for creating a contract (draft) for a reservation."""
+    
+    reservation_id = serializers.UUIDField(write_only=True)
+    
+    class Meta:
+        model = Contract
+        fields = [
+            'id', 'reservation_id', 'contract_type', 'template', 'notes'
+        ]
+        read_only_fields = ['id']
+    
+    def validate_reservation_id(self, value):
+        try:
+            res = Reservation.objects.get(id=value)
+        except Reservation.DoesNotExist:
+            raise serializers.ValidationError("Réservation introuvable.")
+        if res.status != 'confirmed':
+            raise serializers.ValidationError(
+                "Un contrat ne peut être créé que pour une réservation confirmée."
+            )
+        if hasattr(res, 'contract') and res.contract:
+            raise serializers.ValidationError("Cette réservation a déjà un contrat.")
+        return value
+    
+    def create(self, validated_data):
+        reservation_id = validated_data.pop('reservation_id')
+        reservation = Reservation.objects.get(id=reservation_id)
+        validated_data['reservation'] = reservation
+        validated_data['created_by'] = self.context['request'].user
+        return super().create(validated_data)
+
+
+class ContractUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating a contract in draft status."""
+    
+    class Meta:
+        model = Contract
+        fields = ['contract_type', 'template', 'notes']
+    
+    def validate(self, data):
+        if not self.instance.can_be_edited():
+            raise serializers.ValidationError("Seul un contrat en brouillon peut être modifié.")
+        return data

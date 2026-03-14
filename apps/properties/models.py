@@ -16,7 +16,7 @@ class Property(models.Model):
     
     # Basic Information
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    title = models.CharField(max_length=200)
+    title = models.CharField(max_length=100)
     description = models.TextField()
     
     # Property Type & Status

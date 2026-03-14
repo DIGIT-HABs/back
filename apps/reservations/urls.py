@@ -8,6 +8,8 @@ from . import views
 
 # Create router and register viewsets
 router = DefaultRouter()
+router.register(r'contract-templates', views.ContractTemplateViewSet, basename='contract-template')
+router.register(r'contracts', views.ContractViewSet, basename='contract')
 router.register(r'payments', views.PaymentViewSet, basename='payment')
 router.register(r'', views.ReservationViewSet, basename='reservation')
 

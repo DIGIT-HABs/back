@@ -26,13 +26,13 @@ endpoints_to_test = [
     {
         "name": "Users List",
         "method": "GET",
-        "url": f"{BASE_URL}/api/auth/auth/users/",
+        "url": f"{BASE_URL}/api/auth/users/",
         "auth_required": True
     },
     {
         "name": "Agencies List",
         "method": "GET",
-        "url": f"{BASE_URL}/api/auth/auth/agencies/",
+        "url": f"{BASE_URL}/api/auth/agencies/",
         "auth_required": True
     },
     {

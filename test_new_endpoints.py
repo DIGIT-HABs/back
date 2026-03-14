@@ -118,7 +118,7 @@ class EndpointTester:
                 # Fallback : essayer de récupérer depuis le profil
                 self.print_info("Agence non trouvée dans la réponse, tentative via profil...")
                 # On peut essayer de récupérer via l'endpoint profile
-                profile_response = self.make_request('GET', '/auth/auth/profiles/')
+                profile_response = self.make_request('GET', '/auth/profiles/')
                 if profile_response and profile_response.status_code == 200:
                     profile_data = profile_response.json()
                     if isinstance(profile_data, list) and len(profile_data) > 0:

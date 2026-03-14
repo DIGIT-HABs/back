@@ -6,6 +6,7 @@ from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.filters import SearchFilter, OrderingFilter
+from rest_framework.exceptions import NotFound
 from django_filters.rest_framework import DjangoFilterBackend
 # from django.contrib.gis.geos import Point
 # from django.contrib.gis.measure import D
@@ -24,6 +25,7 @@ from .permissions import (
     IsAdminOrAgent, CanManageVisits, CanCreateVisit,
     CanUploadDocuments, CanUploadImages
 )
+import os
 
 
 class PropertyViewSet(viewsets.ModelViewSet):
@@ -70,33 +72,47 @@ class PropertyViewSet(viewsets.ModelViewSet):
         
         return [permission() for permission in permission_classes]
     
+    def get_object(self):
+        """For agents: return 404 if property status is not 'available' (detail view)."""
+        obj = super().get_object()
+        user = self.request.user
+        role = getattr(user, 'role', None)
+        if user.is_authenticated and role != 'agent' and role != 'admin':
+            if obj.status != 'available':
+                raise NotFound('Ce bien n\'est pas disponible.')
+        return obj
+    
     def get_queryset(self):
         """Get filtered queryset based on user role and query parameters."""
         queryset = super().get_queryset()
         
         user = self.request.user
         
-        # Check if user is authenticated first
-        if not user.is_authenticated:
-            # Anonymous users: only see available and public properties
-            return queryset.filter(status='available', is_public=True)
+        # # Check if user is authenticated first
+        # if not user.is_authenticated:
+        #     # Anonymous users: only see available and public properties
+        #     return queryset.filter(status='available', is_public=True)
         
         # Filter based on user role (authenticated users only)
-        if user.role == 'client':
+        print("user:", user)
+        role = getattr(user, 'role', None)
+        print("role:", role)
+        if role == 'client':
             # Clients can only see available and public properties
             queryset = queryset.filter(status='available', is_public=True)
-        elif user.role == 'agent':
+        elif role == 'agent':
             # Agents can see all properties from their agency + public properties
             if hasattr(user, 'profile') and user.profile.agency:
                 queryset = queryset.filter(
                     Q(agency=user.profile.agency) | Q(is_public=True)
                 )
-        elif user.role == 'admin' or user.is_staff or user.is_superuser:
+        elif role == 'admin' or getattr(user, 'is_staff', False) or getattr(user, 'is_superuser', False):
             # Admin can see all properties
             pass
         else:
             # Unknown role: only public available properties
-            queryset = queryset.filter(status='available', is_public=True)
+            print("role:", role)
+            # queryset = queryset.filter(status='available', is_public=True)
         
         # Apply additional filters from query parameters
         # latitude = self.request.query_params.get('latitude')
@@ -212,8 +228,17 @@ class PropertyViewSet(viewsets.ModelViewSet):
             )
         
         try:
+            # suppremer aussi le l'image
+            
+          
+
             image = PropertyImage.objects.get(id=image_id, property=property_obj)
+            image_path = image.image.path
+            if os.path.exists(image_path):
+                os.remove(image_path)
+            
             image.delete()
+            # suppremer aussi le l'image
             return Response({'message': 'Image supprimée avec succès'}, status=status.HTTP_200_OK)
         except PropertyImage.DoesNotExist:
             return Response(

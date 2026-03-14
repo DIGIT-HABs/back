@@ -14,7 +14,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Security & Debug
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-change-me')
 DEBUG = config('DEBUG', default=True, cast=bool)
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,0.0.0.0,192.168.1.135', cast=lambda v: [s.strip() for s in v.split(',')])
+ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='localhost,127.0.0.1,0.0.0.0,192.168.1.35', cast=lambda v: [s.strip() for s in v.split(',')])
 
 # Apps
 DJANGO_APPS = [
@@ -238,20 +238,20 @@ CELERY_TASK_QUEUES = [
 ]
 
 # Redis Configuration
-REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/2')
-CACHES = {
-    'default': {
-        'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': REDIS_URL,
-        'OPTIONS': {
-            'PARSER_CLASS': 'redis.connection.HiredisParser',
-            'CONNECTION_POOL_KWARGS': {
-                'max_connections': 50,
-                'retry_on_timeout': True,
-            }
-        }
-    }
-}
+# REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/2')
+# CACHES = {
+#     'default': {
+#         'BACKEND': 'django_redis.cache.RedisCache',
+#         'LOCATION': REDIS_URL,
+#         'OPTIONS': {
+#             'PARSER_CLASS': 'redis.connection.HiredisParser',
+#             'CONNECTION_POOL_KWARGS': {
+#                 'max_connections': 50,
+#                 'retry_on_timeout': True,
+#             }
+#         }
+#     }
+# }
 
 # Session Configuration
 SESSION_ENGINE = 'django.contrib.sessions.backends.db'  # Use DB instead of Redis for sessions

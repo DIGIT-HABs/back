@@ -540,11 +540,21 @@ class CalendarService:
             # Récupérer la réservation
             reservation = Reservation.objects.get(id=reservation_id)
             
+            # Client User (réservation a client_profile.user ou created_by, pas .client)
+            client_user = None
+            if getattr(reservation, 'client_profile', None) and getattr(reservation.client_profile, 'user', None):
+                client_user = reservation.client_profile.user
+            elif getattr(reservation, 'created_by', None):
+                client_user = reservation.created_by
+            if not client_user:
+                logger.warning("Réservation sans utilisateur client, planification intelligente ignorée")
+                return None
+
             # Créer ou récupérer les disponibilités client
             client_availability = None
             if client_preferences:
                 client_availability = ClientAvailability.objects.create(
-                    user=reservation.client,
+                    user=client_user,
                     preferred_date=client_preferences.get('preferred_date', date.today()),
                     preferred_time_slot=client_preferences.get('preferred_time_slot', 'any'),
                     urgency=client_preferences.get('urgency', 'normal'),
@@ -581,7 +591,7 @@ class CalendarService:
             
             # Créer la planification
             schedule = VisitSchedule.objects.create(
-                client=reservation.client,
+                client=client_user,
                 agent=agent,
                 property=reservation.property,
                 reservation=reservation,
@@ -653,10 +663,10 @@ class CalendarService:
     def _find_optimal_agent(reservation: Reservation, agent_preferences: Optional[Dict[str, Any]]) -> Optional[User]:
         """Trouve l'agent optimal pour une réservation"""
         
-        # Agents disponibles
+        # Agents disponibles (role et is_active sont sur User, pas sur UserProfile)
         available_agents = User.objects.filter(
-            profile__role='agent',
-            profile__is_active=True
+            role='agent',
+            is_active=True
         )
         
         if agent_preferences and agent_preferences.get('agent_id'):

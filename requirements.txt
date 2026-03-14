@@ -103,6 +103,7 @@ django-celery-results==2.5.1
 
 # Reporting & Export (Phase 1 Post-Deployment)
 reportlab==4.0.9
+qrcode[pil]==7.4.2
 openpyxl==3.1.2
 matplotlib==3.8.2
 xlsxwriter==3.2.0

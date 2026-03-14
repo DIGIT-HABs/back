@@ -14,7 +14,7 @@ class ReviewSerializer(serializers.ModelSerializer):
     """Serializer for Review model."""
     
     author_name = serializers.CharField(source='author.get_full_name', read_only=True)
-    author_avatar = serializers.SerializerMethodField(source='author.avatar')
+    author_avatar = serializers.SerializerMethodField()
     property_title = serializers.CharField(source='property.title', read_only=True)
     agent_name = serializers.CharField(source='agent.get_full_name', read_only=True)
     response_by_name = serializers.CharField(source='response_by.get_full_name', read_only=True)

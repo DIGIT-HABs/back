@@ -4,7 +4,7 @@ Admin configuration for reservations app.
 
 from django.contrib import admin
 from django.utils.html import format_html
-from .models import Reservation, Payment, ReservationActivity
+from .models import Reservation, Payment, ReservationActivity, Contract, ContractTemplate
 
 
 class PaymentInline(admin.TabularInline):
@@ -198,3 +198,18 @@ class ReservationActivityAdmin(admin.ModelAdmin):
     
     def has_change_permission(self, request, obj=None):
         return False
+
+
+@admin.register(ContractTemplate)
+class ContractTemplateAdmin(admin.ModelAdmin):
+    list_display = ['name', 'contract_type', 'is_active', 'created_at']
+    list_filter = ['contract_type', 'is_active']
+    search_fields = ['name', 'body']
+
+
+@admin.register(Contract)
+class ContractAdmin(admin.ModelAdmin):
+    list_display = ['id', 'reservation', 'contract_type', 'status', 'sent_at', 'signed_at', 'created_by', 'created_at']
+    list_filter = ['status', 'contract_type']
+    search_fields = ['reservation__property__title', 'notes']
+    readonly_fields = ['id', 'reservation', 'sent_at', 'signed_at', 'signed_by', 'created_at', 'updated_at']

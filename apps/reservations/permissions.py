@@ -258,3 +258,38 @@ class ReadOnly(permissions.BasePermission):
     def has_permission(self, request, view):
         """Allow read operations for authenticated users."""
         return request.method in permissions.SAFE_METHODS and request.user.is_authenticated
+
+
+class IsContractOwnerOrAgent(permissions.BasePermission):
+    """
+    Permission for contract: reservation owner or assigned agent (or agency).
+    """
+    
+    def has_object_permission(self, request, view, obj):
+        user = request.user
+        if not user.is_authenticated:
+            return False
+        if user.is_staff or user.is_superuser:
+            return True
+        res = obj.reservation
+        if res.assigned_agent and res.assigned_agent == user:
+            return True
+        if res.client_profile and res.client_profile.user == user:
+            return True
+        user_agency = getattr(getattr(user, 'profile', None), 'agency', None)
+        if user_agency and res.property.agency == user_agency:
+            return True
+        return False
+
+
+class CanManageContracts(permissions.BasePermission):
+    """Agents and staff can create/manage contracts."""
+    
+    def has_permission(self, request, view):
+        if not request.user.is_authenticated:
+            return False
+        if request.user.is_staff or request.user.is_superuser:
+            return True
+        if getattr(request.user, 'role', None) in ['agent', 'manager']:
+            return True
+        return False

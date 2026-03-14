@@ -163,11 +163,16 @@ class TimeSlotViewSet(viewsets.ModelViewSet):
             slot = TimeSlot.objects.get(id=slot_id, status='available')
             reservation = Reservation.objects.get(id=reservation_id)
             
-            # Vérifier les permissions
+            # Vérifier les permissions (réservation: client = client_profile.user ou created_by)
+            reservation_client = None
+            if getattr(reservation, 'client_profile', None) and getattr(reservation.client_profile, 'user', None):
+                reservation_client = reservation.client_profile.user
+            else:
+                reservation_client = getattr(reservation, 'created_by', None)
             if (not request.user.is_superuser and 
                 not request.user.is_staff and
                 slot.user != request.user and
-                reservation.client != request.user):
+                reservation_client != request.user):
                 return Response(
                     {'error': 'Permissions insuffisantes'},
                     status=status.HTTP_403_FORBIDDEN

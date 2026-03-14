@@ -9,7 +9,7 @@ from django.core.validators import validate_email
 from django.utils.decorators import method_decorator
 from django.utils.http import urlsafe_base64_encode, urlsafe_base64_decode
 from django.utils.encoding import force_bytes, force_str
-from rest_framework import status, permissions, generics
+from rest_framework import status, permissions, generics, serializers as drf_serializers
 from rest_framework.decorators import api_view, permission_classes, action
 from rest_framework.mixins import ListModelMixin, CreateModelMixin
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -23,11 +23,12 @@ from drf_spectacular.utils import extend_schema, extend_schema_view
 from .models import User, Agency, UserProfile
 from .serializers import (
     UserSerializer, UserCreateSerializer, UserProfileSerializer,
-    AgencySerializer, AgencyCreateSerializer,
+    AgencySerializer, AgencyCreateSerializer, AgencyUpdateSerializer,
     LoginSerializer, TokenObtainPairSerializer,
     PasswordChangeSerializer, PasswordResetSerializer, PasswordResetConfirmSerializer,
     LogoutResponseSerializer, TokenVerifyResponseSerializer, RefreshTokenSerializer,
-    GoogleAuthSerializer, AppleAuthSerializer, RegisterSerializer
+    GoogleAuthSerializer, AppleAuthSerializer, RegisterSerializer,
+    AgentCreateSerializer,
 )
 from .permissions import IsOwnerOrReadOnly, IsAdminUser, IsOwner
 
@@ -185,7 +186,7 @@ class AgencyViewSet(ReadOnlyModelViewSet):
         """Get or manage agency users."""
         agency = self.get_object()
         if request.method == 'GET':
-            users = agency.user_set.all()
+            users = UserModel.objects.filter(profile__agency=agency)
             serializer = UserSerializer(users, many=True)
             return Response(serializer.data)
         
@@ -197,14 +198,35 @@ class AgencyViewSet(ReadOnlyModelViewSet):
         """Get agency statistics."""
         agency = self.get_object()
         stats = {
-            'total_users': agency.user_set.count(),
-            'active_users': agency.user_set.filter(is_active=True).count(),
+            'total_users': agency.users.count(),
+            'active_users': UserModel.objects.filter(profile__agency=agency, is_active=True).count(),
             'total_properties': agency.properties.count() if hasattr(agency, 'properties') else 0,
             'total_clients': agency.clients.count() if hasattr(agency, 'clients') else 0,
             'subscription_days_remaining': agency.get_subscription_days_remaining(),
             'subscription_active': agency.is_subscription_active(),
         }
         return Response(stats)
+
+    @action(detail=False, methods=['get', 'patch'])
+    def me(self, request):
+        """Get or update current user's agency (for agents)."""
+        if not hasattr(request.user, 'profile') or not getattr(request.user.profile, 'agency', None):
+            return Response(
+                {'detail': 'Vous n\'êtes pas rattaché à une agence.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        agency = request.user.profile.agency
+        if request.method == 'GET':
+            serializer = AgencySerializer(agency, context={'request': request})
+            return Response(serializer.data)
+        if request.method == 'PATCH':
+            serializer = AgencyUpdateSerializer(agency, data=request.data, partial=True, context={'request': request})
+            serializer.is_valid(raise_exception=True)
+            serializer.save()
+            # Return full agency with logo_url
+            out = AgencySerializer(agency, context={'request': request})
+            return Response(out.data)
+        return Response(status=status.HTTP_405_METHOD_NOT_ALLOWED)
 
 
 class AgencyCreateView(CreateModelMixin, generics.GenericAPIView):
@@ -217,8 +239,12 @@ class AgencyCreateView(CreateModelMixin, generics.GenericAPIView):
     permission_classes = [AllowAny]  # Allow registration without authentication
     
     def post(self, request, *args, **kwargs):
-        """Create new agency."""
-        return self.create(request, *args, **kwargs)
+        """Create new agency; return full agency with logo_url."""
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        agency = serializer.save()
+        out = AgencySerializer(agency, context={'request': request})
+        return Response(out.data, status=status.HTTP_201_CREATED)
 
 
 class CustomTokenObtainPairView(TokenObtainPairView):
@@ -266,6 +292,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
                 'last_name': user.last_name,
                 'role': getattr(user, 'role', 'client'),
                 'is_verified': getattr(user, 'is_verified', True),
+                'phone': getattr(user, 'phone', None),
             }
         }
         
@@ -413,6 +440,34 @@ class RegisterView(generics.CreateAPIView):
             }, status=status.HTTP_201_CREATED)
         
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CreateAgentView(APIView):
+    """
+    Création d'un compte agent (rattaché à l'agence de l'utilisateur ou à une agence fournie pour les admins).
+    """
+    permission_classes = [IsAuthenticated]
+    serializer_class = AgentCreateSerializer
+
+    def post(self, request):
+        serializer = AgentCreateSerializer(data=request.data, context={'request': request})
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            user = serializer.save()
+        except drf_serializers.ValidationError as e:
+            return Response(e.detail, status=status.HTTP_400_BAD_REQUEST)
+        return Response({
+            'message': 'Agent créé avec succès.',
+            'user': {
+                'id': str(user.id),
+                'username': user.username,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'role': user.role,
+            },
+        }, status=status.HTTP_201_CREATED)
 
 
 class CurrentUserView(APIView):

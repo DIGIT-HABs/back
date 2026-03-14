@@ -105,7 +105,7 @@ Tous les diagrammes de classes et cas d'utilisation sont disponibles dans :
 # 1. Créer l'environnement virtuel
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
-# ou venv\Scripts\activate  # Windows
+venv\Scripts\activate  # Windows
 
 # 2. Installer les dépendances
 pip install -r requirements.txt
@@ -126,7 +126,7 @@ python manage.py migrate
 python manage.py createsuperuser
 
 # 6. Lancer le serveur
-python manage.py runserver
+python manage.py runserver 0000
 daphne -b 0.0.0.0 -p 8000 digit_hab_crm.asgi:application
 ```
 

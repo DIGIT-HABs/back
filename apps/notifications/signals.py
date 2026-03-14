@@ -6,6 +6,7 @@ Automatisation des notifications en temps réel
 import logging
 from django.db.models.signals import post_save, pre_save, post_delete
 from django.dispatch import receiver
+from django.db import transaction
 from django.contrib.auth import get_user_model
 from django.utils import timezone
 from django.contrib.contenttypes.models import ContentType
@@ -56,77 +57,101 @@ def handle_notification_status_change(sender, instance, created, **kwargs):
 # SIGNALS POUR LES MODÈLES EXISTANTS
 # ============================================================================
 
+def _reservation_client_user_id(reservation):
+    """ID utilisateur client pour une réservation (client_profile.user ou created_by)."""
+    if getattr(reservation, 'client_profile', None) and getattr(reservation.client_profile, 'user_id', None):
+        return str(reservation.client_profile.user_id)
+    if getattr(reservation, 'created_by_id', None):
+        return str(reservation.created_by_id)
+    return None
+
+
 @receiver(post_save, sender='reservations.Reservation')
 def handle_reservation_status_change(sender, instance, created, **kwargs):
-    """Gère les notifications pour les changements de statut des réservations"""
-    
-    try:
-        if created:
-            # Nouvelle réservation créée
-            NotificationService.create_notification(
-                recipient_ids=[str(instance.client.id)],
-                title="Nouvelle réservation confirmée",
-                message=f"Votre réservation pour {instance.property.title} a été créée avec succès.",
-                notification_type='success',
-                priority='normal',
-                content_type_id=ContentType.objects.get_for_model(instance).id,
-                object_id=instance.id,
-                channels=['websocket', 'in_app', 'email']
-            )
-            
-            # Notifier l'agent assigné
-            if instance.agent:
-                NotificationService.create_notification(
-                    recipient_ids=[str(instance.agent.id)],
-                    title="Nouvelle réservation assignée",
-                    message=f"Une nouvelle réservation a été assignée: {instance.property.title}",
-                    notification_type='info',
-                    priority='normal',
-                    content_type_id=ContentType.objects.get_for_model(instance).id,
-                    object_id=instance.id,
-                    channels=['websocket', 'in_app']
-                )
-        
-        else:
-            # Vérifier les changements de statut
-            old_instance = sender.objects.get(id=instance.id)
-            
-            if old_instance.status != instance.status:
-                status_messages = {
-                    'confirmed': 'Votre réservation a été confirmée',
-                    'cancelled': 'Votre réservation a été annulée',
-                    'completed': 'Votre réservation a été marquée comme terminée',
-                    'expired': 'Votre réservation a expiré'
-                }
-                
-                if instance.status in status_messages:
-                    # Notifier le client
+    """Gère les notifications pour les changements de statut des réservations (après commit pour ne pas casser la transaction)."""
+    client_id = _reservation_client_user_id(instance)
+    agent = getattr(instance, 'assigned_agent', None) or (getattr(instance.property, 'agent', None) if getattr(instance, 'property', None) else None)
+    # Capturer les valeurs pour la closure on_commit (instance peut être stale après commit)
+    reservation_id = instance.id
+    property_title = instance.property.title if getattr(instance, 'property', None) else ''
+    status_display = instance.get_status_display()
+    content_type_id = ContentType.objects.get_for_model(instance).id
+
+    if created:
+        def do_notify_created():
+            try:
+                if client_id:
                     NotificationService.create_notification(
-                        recipient_ids=[str(instance.client.id)],
-                        title="Mise à jour de réservation",
-                        message=status_messages[instance.status],
-                        notification_type='info' if instance.status in ['confirmed', 'completed'] else 'warning',
+                        recipient_ids=[client_id],
+                        title="Nouvelle réservation confirmée",
+                        message=f"Votre réservation pour {property_title} a été créée avec succès.",
+                        notification_type='success',
                         priority='normal',
-                        content_type_id=ContentType.objects.get_for_model(instance).id,
-                        object_id=instance.id,
+                        content_type_id=content_type_id,
+                        object_id=reservation_id,
                         channels=['websocket', 'in_app', 'email']
                     )
-                    
-                    # Notifier l'agent
-                    if instance.agent:
+                if agent:
+                    NotificationService.create_notification(
+                        recipient_ids=[str(agent.id)],
+                        title="Nouvelle réservation assignée",
+                        message=f"Une nouvelle réservation a été assignée: {property_title}",
+                        notification_type='info',
+                        priority='normal',
+                        content_type_id=content_type_id,
+                        object_id=reservation_id,
+                        channels=['websocket', 'in_app']
+                    )
+            except Exception as e:
+                logger.error(f"Erreur lors de la notification de réservation {reservation_id}: {e}")
+
+        transaction.on_commit(do_notify_created)
+    else:
+        try:
+            old_instance = sender.objects.get(id=instance.id)
+            old_status = old_instance.status
+        except Exception:
+            old_status = None
+
+        def do_notify_updated_with_old():
+            try:
+                from .models import Reservation
+                res = Reservation.objects.get(id=reservation_id)
+                client_id_late = _reservation_client_user_id(res)
+                agent_late = getattr(res, 'assigned_agent', None) or (getattr(res.property, 'agent', None) if getattr(res, 'property', None) else None)
+                if old_status != res.status:
+                    status_messages = {
+                        'confirmed': 'Votre réservation a été confirmée',
+                        'cancelled': 'Votre réservation a été annulée',
+                        'completed': 'Votre réservation a été marquée comme terminée',
+                        'expired': 'Votre réservation a expiré'
+                    }
+                    if res.status in status_messages and client_id_late:
                         NotificationService.create_notification(
-                            recipient_ids=[str(instance.agent.id)],
+                            recipient_ids=[client_id_late],
+                            title="Mise à jour de réservation",
+                            message=status_messages[res.status],
+                            notification_type='info' if res.status in ['confirmed', 'completed'] else 'warning',
+                            priority='normal',
+                            content_type_id=ContentType.objects.get_for_model(res).id,
+                            object_id=res.id,
+                            channels=['websocket', 'in_app', 'email']
+                        )
+                    if agent_late:
+                        NotificationService.create_notification(
+                            recipient_ids=[str(agent_late.id)],
                             title="Statut de réservation mis à jour",
-                            message=f"La réservation {instance.property.title} est maintenant: {instance.get_status_display()}",
+                            message=f"La réservation {res.property.title} est maintenant: {res.get_status_display()}",
                             notification_type='info',
                             priority='normal',
-                            content_type_id=ContentType.objects.get_for_model(instance).id,
-                            object_id=instance.id,
+                            content_type_id=ContentType.objects.get_for_model(res).id,
+                            object_id=res.id,
                             channels=['websocket', 'in_app']
                         )
-    
-    except Exception as e:
-        logger.error(f"Erreur lors de la notification de réservation {instance.id}: {e}")
+            except Exception as e:
+                logger.error(f"Erreur lors de la notification de réservation {reservation_id}: {e}")
+
+        transaction.on_commit(do_notify_updated_with_old)
 
 
 @receiver(post_save, sender='reservations.Payment')
@@ -134,10 +159,13 @@ def handle_payment_status_change(sender, instance, created, **kwargs):
     """Gère les notifications pour les changements de statut des paiements"""
     
     try:
+        res = instance.reservation
+        client_id = _reservation_client_user_id(res)
+        if not client_id:
+            return
         if created:
-            # Nouveau paiement créé
             NotificationService.create_notification(
-                recipient_ids=[str(instance.reservation.client.id)],
+                recipient_ids=[client_id],
                 title="Paiement en attente",
                 message=f"Un paiement de {instance.amount} {instance.currency} est en attente pour votre réservation.",
                 notification_type='info',
@@ -153,9 +181,8 @@ def handle_payment_status_change(sender, instance, created, **kwargs):
             
             if old_instance.status != instance.status:
                 if instance.status == 'completed':
-                    # Paiement complété
                     NotificationService.create_notification(
-                        recipient_ids=[str(instance.reservation.client.id)],
+                        recipient_ids=[client_id],
                         title="Paiement confirmé",
                         message=f"Votre paiement de {instance.amount} {instance.currency} a été confirmé avec succès.",
                         notification_type='success',
@@ -166,9 +193,8 @@ def handle_payment_status_change(sender, instance, created, **kwargs):
                     )
                 
                 elif instance.status == 'failed':
-                    # Paiement échoué
                     NotificationService.create_notification(
-                        recipient_ids=[str(instance.reservation.client.id)],
+                        recipient_ids=[client_id],
                         title="Échec du paiement",
                         message=f"Votre paiement de {instance.amount} {instance.currency} a échoué. Veuillez réessayer.",
                         notification_type='error',
@@ -179,10 +205,9 @@ def handle_payment_status_change(sender, instance, created, **kwargs):
                     )
                 
                 elif instance.status in ['refunded', 'partially_refunded']:
-                    # Paiement remboursé
                     notification_type = 'success' if instance.status == 'refunded' else 'info'
                     NotificationService.create_notification(
-                        recipient_ids=[str(instance.reservation.client.id)],
+                        recipient_ids=[client_id],
                         title="Remboursement traité",
                         message=f"Un remboursement de {instance.refunded_amount} {instance.currency} a été effectué.",
                         notification_type=notification_type,

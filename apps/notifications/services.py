@@ -45,14 +45,10 @@ class WebSocketService:
                     "message": message
                 }
             )
-            
-            # Mettre à jour le last_seen de l'abonnement
-            NotificationSubscription.objects.filter(
-                user_id=user_id,
-                channel_type='user',
-                is_active=True
-            ).update(last_seen=timezone.now())
-            
+            # Note: pas de mise à jour last_seen ici car send_to_user est souvent
+            # appelé depuis un contexte sync (run_until_complete) → database_sync_to_async
+            # provoquerait "Cannot submit onto CurrentThreadExecutor from its own thread".
+            # Le last_seen est mis à jour dans le consumer à la connexion/déconnexion.
             return True
             
         except Exception as e:

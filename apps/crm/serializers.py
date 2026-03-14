@@ -24,13 +24,14 @@ class ClientProfileSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source='user.username', read_only=True)
     full_name = serializers.CharField(source='user.get_full_name', read_only=True)
     email = serializers.CharField(source='user.email', read_only=True)
+    phone = serializers.CharField(source='user.phone', read_only=True, allow_blank=True)
     matching_properties = serializers.SerializerMethodField()
     conversion_score_display = serializers.CharField(source='get_conversion_score_display', read_only=True)
     
     class Meta:
         model = ClientProfile
         fields = [
-            'id', 'user', 'user_id', 'username', 'full_name', 'email',
+            'id', 'user', 'user_id', 'username', 'full_name', 'email', 'phone',
             'date_of_birth', 'nationality', 'marital_status',
             'preferred_contact_method', 'preferred_contact_time',
             'max_budget', 'min_budget', 'preferred_property_types', 'preferred_locations',
@@ -44,7 +45,7 @@ class ClientProfileSerializer(serializers.ModelSerializer):
             'created_at', 'updated_at', 'matching_properties'
         ]
         read_only_fields = [
-            'id', 'user', 'username', 'full_name', 'email', 'last_property_view',
+            'id', 'user', 'username', 'full_name', 'email', 'phone', 'last_property_view',
             'total_properties_viewed', 'total_inquiries_made', 'conversion_score',
             'created_at', 'updated_at', 'matching_properties', 'conversion_score_display'
         ]
@@ -188,6 +189,8 @@ class ClientInteractionSerializer(serializers.ModelSerializer):
     client_id = serializers.UUIDField(write_only=True)
     agent = serializers.StringRelatedField(read_only=True)
     agent_id = serializers.UUIDField(write_only=True)
+    client_name = serializers.CharField(source='client.get_full_name', read_only=True)
+    agent_name = serializers.CharField(source='agent.get_full_name', read_only=True)
     related_property = serializers.SerializerMethodField()
     related_object_type = serializers.CharField(source='content_type.model', read_only=True)
     
@@ -195,6 +198,7 @@ class ClientInteractionSerializer(serializers.ModelSerializer):
         model = ClientInteraction
         fields = [
             'id', 'client', 'client_id', 'agent', 'agent_id',
+            'client_name', 'agent_name',
             'interaction_type', 'channel', 'subject', 'content', 'outcome',
             'scheduled_date', 'completed_date', 'duration_minutes',
             'related_property', 'related_object_type',
@@ -202,7 +206,8 @@ class ClientInteractionSerializer(serializers.ModelSerializer):
             'priority', 'status', 'created_at', 'updated_at'
         ]
         read_only_fields = [
-            'id', 'client', 'agent', 'related_property', 'related_object_type',
+            'id', 'client', 'agent', 'client_name', 'agent_name',
+            'related_property', 'related_object_type',
             'created_at', 'updated_at'
         ]
     
@@ -254,7 +259,8 @@ class LeadSerializer(serializers.ModelSerializer):
     full_name = serializers.CharField(read_only=True)
     urgency_score = serializers.SerializerMethodField()
     next_actions = serializers.SerializerMethodField()
-    
+    client_profile_id = serializers.SerializerMethodField()
+
     class Meta:
         model = Lead
         fields = [
@@ -263,12 +269,12 @@ class LeadSerializer(serializers.ModelSerializer):
             'property_type_interest', 'budget_range', 'location_interest', 'timeframe',
             'assigned_agent', 'assigned_agent_id', 'agency', 'agency_id',
             'notes', 'next_action', 'next_action_date', 'next_actions',
-            'converted_to_client', 'conversion_date', 'lost_reason',
+            'converted_to_client', 'conversion_date', 'lost_reason', 'client_profile_id',
             'created_at', 'updated_at'
         ]
         read_only_fields = [
             'id', 'assigned_agent', 'agency', 'full_name', 'score', 'urgency_score',
-            'next_actions', 'converted_to_client', 'conversion_date',
+            'next_actions', 'converted_to_client', 'conversion_date', 'client_profile_id',
             'created_at', 'updated_at'
         ]
     
@@ -283,7 +289,16 @@ class LeadSerializer(serializers.ModelSerializer):
         from .matching import LeadMatcher
         matcher = LeadMatcher(obj)
         return matcher.recommend_action()
-    
+
+    def get_client_profile_id(self, obj):
+        """When lead is converted, return the linked client profile id for navigation."""
+        if not obj.converted_to_client:
+            return None
+        profile = ClientProfile.objects.filter(
+            user__email=obj.email, user__role='client'
+        ).values_list('id', flat=True).first()
+        return str(profile) if profile else None
+
     def create(self, validated_data):
         """Create lead and calculate initial score."""
         agency_id = validated_data.pop('agency_id')
@@ -394,7 +409,7 @@ class ClientNoteCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = ClientNote
         fields = [
-            'client_profile', 'title', 'content', 'note_type',
+            'title', 'content', 'note_type',
             'is_important', 'is_pinned', 'reminder_date',
         ]
     

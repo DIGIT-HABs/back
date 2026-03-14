@@ -78,7 +78,7 @@ class AgencyAdmin(admin.ModelAdmin):
     def get_queryset(self, request):
         """Annotate query with counts."""
         return super().get_queryset(request).annotate(
-            users_count=models.Count('user_set'),
+            users_count=models.Count('users'),
             properties_count=models.Count('properties'),
             clients_count=models.Count('clients')
         )

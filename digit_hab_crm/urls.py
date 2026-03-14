@@ -6,15 +6,28 @@ from django.contrib import admin
 from django.urls import path, include
 from django.conf import settings
 from django.conf.urls.static import static
+from django.http import JsonResponse
 from drf_spectacular.views import (
     SpectacularAPIView, 
     SpectacularRedocView, 
     SpectacularSwaggerView
 )
 
+
+def health_check(request):
+    """Health check endpoint for monitoring and deployment verification."""
+    return JsonResponse({
+        "status": "ok",
+        "message": "DIGIT-HAB CRM is running",
+        "version": "1.0"
+    })
+
 urlpatterns = [
     # Admin interface
     path('admin/', admin.site.urls),
+    
+    # Health check endpoint
+    path('health/', health_check, name='health-check'),
     
     # API Documentation
     path('api/schema/', SpectacularAPIView.as_view(), name='schema'),

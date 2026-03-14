@@ -13,14 +13,14 @@ from django.core.cache import cache
 from django.http import HttpResponse
 from datetime import datetime
 
-from apps.auth.models import User, Agency
+from apps.auth.models import User, Agency, UserProfile
 from apps.properties.models import Property
 from .models import ClientProfile, PropertyInterest, ClientInteraction, Lead, ClientNote
 from .serializers import (
     ClientProfileSerializer, PropertyInterestSerializer, ClientInteractionSerializer,
     LeadSerializer, LeadConversionSerializer, PropertyMatchSerializer,
     ClientDashboardSerializer, AgentDashboardSerializer,
-    ClientNoteSerializer, ClientNoteCreateSerializer
+    ClientNoteSerializer, ClientNoteCreateSerializer, PropertyListSerializer
 )
 from .permissions import (
     IsClientOrOwner, IsAgentOrAdmin, CanManageClientProfile, CanManageLeads,
@@ -28,6 +28,8 @@ from .permissions import (
     CanCreateInteraction, CanAccessMatchingResults, CanViewDashboard, CanConvertLead
 )
 from .matching import PropertyMatcher, LeadMatcher, auto_match_properties_for_client, auto_assign_leads_to_agents
+from apps.reservations.models import Reservation
+from apps.reservations.serializers import ReservationSerializer
 from .services import ReportingService
 
 
@@ -56,15 +58,32 @@ class ClientProfileViewSet(viewsets.ModelViewSet):
         
         if user.role == 'admin':
             # Admin can see all client profiles
-            return queryset
+            queryset = queryset
         elif user.role == 'agent':
             # Agent can see profiles for their agency's clients
-            return queryset.filter(user__profile__agency=user.agency)
+            queryset = queryset.filter(user__profile__agency=user.agency)
         elif user.role == 'client':
             # Client can only see their own profile
             return queryset.filter(user=user)
-        
-        return queryset.none()
+        else:
+            return queryset.none()
+
+        # Quick filters for list (agent dashboard)
+        if self.action == 'list':
+            if self.request.query_params.get('has_active_reservation') == 'true':
+                queryset = queryset.filter(
+                    id__in=Reservation.objects.filter(
+                        client_profile__isnull=False,
+                        status__in=['pending', 'confirmed']
+                    ).values_list('client_profile_id', flat=True).distinct()
+                )
+            if self.request.query_params.get('needs_follow_up') == 'true':
+                # ClientInteraction.client is User; ClientProfile.user is User
+                queryset = queryset.filter(
+                    user__interactions__requires_follow_up=True,
+                    user__interactions__follow_up_completed=False
+                ).distinct()
+        return queryset
     
     def get_permissions(self):
         """Get permissions for different actions."""
@@ -76,6 +95,120 @@ class ClientProfileViewSet(viewsets.ModelViewSet):
             permission_classes = [permissions.IsAuthenticated, CanViewDashboard]
         
         return [permission() for permission in permission_classes]
+    
+    @action(detail=False, methods=['post'], url_path='create_full', permission_classes=[permissions.IsAuthenticated, IsAgentOrAdmin])
+    def create_full(self, request):
+        """
+        Create or update a full client (user + client profile).
+        
+        Expected payload:
+        {
+          "user": {
+            "first_name": "...",
+            "last_name": "...",
+            "email": "...",
+            "phone": "..."
+          },
+          "profile": {
+            ... fields from ClientProfileSerializer (except user_id) ...
+          }
+        }
+        """
+        user_data = request.data.get('user') or {}
+        profile_data = request.data.get('profile') or {}
+
+        email = (user_data.get('email') or '').strip().lower()
+        first_name = (user_data.get('first_name') or '').strip()
+        last_name = (user_data.get('last_name') or '').strip()
+
+        if not email or not first_name or not last_name:
+            return Response(
+                {'detail': 'Prénom, nom et email sont obligatoires.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Resolve agency (for agents we use their agency via profile)
+        agency = None
+        if getattr(request.user, 'role', None) == 'agent':
+            agency = getattr(getattr(request.user, 'profile', None), 'agency', None)
+
+        # Find or create user
+        user = User.objects.filter(email=email).first()
+        if user:
+            # Ensure user is marked as client
+            updated_fields = []
+            if user.role != 'client':
+                user.role = 'client'
+                updated_fields.append('role')
+            # Keep names/phone in sync if provided
+            if first_name and user.first_name != first_name:
+                user.first_name = first_name
+                updated_fields.append('first_name')
+            if last_name and user.last_name != last_name:
+                user.last_name = last_name
+                updated_fields.append('last_name')
+            phone = user_data.get('phone')
+            if phone is not None and phone != user.phone:
+                user.phone = phone
+                updated_fields.append('phone')
+            if updated_fields:
+                user.save(update_fields=updated_fields)
+
+            # Ensure profile/agency linkage
+            if agency is not None:
+                profile = getattr(user, 'profile', None)
+                if profile:
+                    if profile.agency != agency:
+                        profile.agency = agency
+                        profile.save(update_fields=['agency'])
+                else:
+                    UserProfile.objects.create(user=user, agency=agency)
+        else:
+            # Create a new client user
+            base_username = email.split('@')[0] or 'client'
+            username = base_username
+            counter = 1
+            while User.objects.filter(username=username).exists():
+                username = f"{base_username}_{counter}"
+                counter += 1
+            user = User.objects.create_user(
+                username=username,
+                email=email,
+                first_name=first_name,
+                last_name=last_name,
+                phone=user_data.get('phone', ''),
+                role='client',
+            )
+
+            # Create profile with agency if available
+            if agency is not None:
+                UserProfile.objects.create(user=user, agency=agency)
+
+        # Create or update client profile
+        if hasattr(user, 'client_profile'):
+            client_profile = user.client_profile
+            serializer = ClientProfileSerializer(
+                client_profile,
+                data=profile_data,
+                partial=True,
+                context={'request': request},
+            )
+        else:
+            profile_payload = profile_data.copy()
+            profile_payload['user_id'] = str(user.id)
+            serializer = ClientProfileSerializer(
+                data=profile_payload,
+                context={'request': request},
+            )
+
+        if serializer.is_valid():
+            client_profile = serializer.save()
+            return Response(
+                ClientProfileSerializer(client_profile, context={'request': request}).data,
+                status=status.HTTP_201_CREATED,
+            )
+
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
     def matching_properties(self, request, pk=None):
@@ -146,8 +279,16 @@ class ClientProfileViewSet(viewsets.ModelViewSet):
                 status='active'
             ).order_by('interaction_date')[:5]
             
-            # Get matching properties
-            matching_properties = client_profile.get_matching_properties(limit=5)
+            # Get reservations for this client profile
+            reservations = Reservation.objects.filter(
+                client_profile=client_profile
+            ).order_by('-created_at')[:5]
+            
+            # Get matching properties and serialize them
+            matching_qs = client_profile.get_matching_properties(limit=5)
+            matching_properties = PropertyListSerializer(
+                matching_qs, many=True, context={'request': request}
+            ).data
             
             # Activity summary
             activity_summary = {
@@ -161,6 +302,7 @@ class ClientProfileViewSet(viewsets.ModelViewSet):
                 'profile': ClientProfileSerializer(client_profile).data,
                 'recent_interactions': ClientInteractionSerializer(recent_interactions, many=True).data,
                 'upcoming_visits': PropertyInterestSerializer(upcoming_visits, many=True).data,
+                 'reservations': ReservationSerializer(reservations, many=True).data,
                 'matching_properties': matching_properties,
                 'activity_summary': activity_summary
             }
@@ -697,14 +839,22 @@ class LeadViewSet(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated, CanConvertLead])
     def convert(self, request, pk=None):
-        """Convert lead to client."""
+        """Convert lead to client. Returns lead data + client_profile_id when converted."""
         try:
             lead = self.get_object()
             serializer = LeadConversionSerializer(lead, data=request.data, partial=True)
             
             if serializer.is_valid():
                 serializer.save()
-                return Response(serializer.data)
+                lead.refresh_from_db()
+                response_data = LeadSerializer(lead, context={'request': request}).data
+                if lead.converted_to_client:
+                    client_profile = ClientProfile.objects.filter(
+                        user__email=lead.email, user__role='client'
+                    ).first()
+                    if client_profile:
+                        response_data['client_profile_id'] = str(client_profile.id)
+                return Response(response_data)
             else:
                 return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
                 

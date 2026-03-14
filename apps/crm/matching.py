@@ -49,27 +49,9 @@ class PropertyMatcher:
         # Sort by score (descending) and limit results
         properties_with_scores.sort(key=lambda x: x[1], reverse=True)
         
-        # Return only property objects, but we'll annotate with score
-        matched_properties = [prop for prop, score in properties_with_scores[:limit]]
-        
-        # Add match scores as annotations
-        if matched_properties:
-            from django.db.models import Value, IntegerField
-            from django.db.models.functions import Coalesce
-            
-            # Create a mapping of property_id to score
-            score_map = {str(prop.id): score for prop, score in properties_with_scores[:limit]}
-            
-            # Annotate with match scores
-            queryset = Property.objects.filter(id__in=[p.id for p in matched_properties])
-            queryset = queryset.annotate(
-                match_score=Coalesce(
-                    Value(score_map.get(str(obj.id), 0), output_field=IntegerField()),
-                    Value(0, output_field=IntegerField())
-                )
-            )
-            
-            return queryset.order_by('-match_score')
+        # Retourne simplement la liste ordonnée des propriétés
+        if properties_with_scores:
+            return [prop for prop, score in properties_with_scores[:limit]]
         
         return Property.objects.none()
     
@@ -237,7 +219,11 @@ class PropertyMatcher:
             return 7  # Neutral score if no specific requirements
         
         must_have = self.client_profile.must_have_features
-        property_features = property_obj.features or {}
+        # Some Property modèles utilisent additional_features au lieu de features
+        if hasattr(property_obj, 'features'):
+            property_features = property_obj.features or {}
+        else:
+            property_features = getattr(property_obj, 'additional_features', {}) or {}
         
         matches = 0
         total_required = len(must_have)

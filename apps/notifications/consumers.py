@@ -127,11 +127,12 @@ class NotificationConsumer(AsyncWebsocketConsumer):
             }))
     
     async def send_notification(self, event):
-        """Envoie une notification au client"""
+        """Envoie une notification au client (event['notification'] ou event['message'])"""
         try:
+            payload = event.get('notification') or event.get('message') or {}
             await self.send(text_data=json.dumps({
                 'type': 'notification',
-                'notification': event['notification']
+                'notification': payload
             }))
         except Exception as e:
             logger.error(f"Erreur envoi notification WebSocket: {e}")

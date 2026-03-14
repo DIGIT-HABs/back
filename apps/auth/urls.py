@@ -22,7 +22,7 @@ from .test_views import TestAuthView
 
 urlpatterns = [
     # API routes
-    path('auth/', include(router.urls)),
+    path('', include(router.urls)),
     
     # JWT Authentication
     path('login/', views.CustomTokenObtainPairView.as_view(), name='login'),
@@ -52,4 +52,6 @@ urlpatterns = [
     # User management (simple endpoints)
     path('users/list/', views.UserListView.as_view(), name='user_list'),
     path('users/<uuid:pk>/', views.UserDetailView.as_view(), name='user_detail'),
+    # Création compte agent (authentifié, agence de l'utilisateur ou agency_id pour admin)
+    path('agents/create/', views.CreateAgentView.as_view(), name='create_agent'),
 ]

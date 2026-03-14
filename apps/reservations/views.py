@@ -5,7 +5,7 @@ Views for reservations management API.
 from rest_framework import viewsets, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from django_filters.rest_framework import DjangoFilterBackend
 from django.db import transaction, models
 from django.db.models import Q, Count, Sum, Avg
@@ -14,19 +14,23 @@ from django.shortcuts import get_object_or_404
 from apps.auth.models import User
 from apps.properties.models import Property
 from apps.crm.models import ClientProfile
-from .models import Reservation, Payment, ReservationActivity
+from .models import Reservation, Payment, ReservationActivity, Contract, ContractTemplate
 from .serializers import (
     ReservationSerializer, ReservationCreateSerializer, ReservationUpdateSerializer,
     ReservationStatusUpdateSerializer, PaymentSerializer, PaymentCreateSerializer,
     PaymentStatusUpdateSerializer, ReservationActivitySerializer,
-    ReservationStatsSerializer
+    ReservationStatsSerializer,
+    ContractSerializer, ContractCreateSerializer, ContractUpdateSerializer,
+    ContractTemplateSerializer
 )
 from .permissions import (
     IsReservationOwnerOrAgent, CanManageReservations, CanViewAllReservations,
     CanAccessPaymentData, CanProcessPayments, IsAgencyMember,
-    CanScheduleVisits, CanModifyReservationStatus, ReadOnly
+    CanScheduleVisits, CanModifyReservationStatus, ReadOnly,
+    IsContractOwnerOrAgent, CanManageContracts
 )
 from .services import PaymentService, NotificationService
+from .contract_pdf import save_contract_pdf_to_field
 
 
 class ReservationViewSet(viewsets.ModelViewSet):
@@ -137,6 +141,8 @@ class ReservationViewSet(viewsets.ModelViewSet):
             # Send notification if it's a visit reservation
             if reservation.reservation_type == 'visit':
                 NotificationService.send_visit_confirmation(reservation)
+            # In-app notification: new reservation (agent + client if has account)
+            NotificationService.send_in_app_reservation_created(reservation)
     
     def perform_update(self, serializer):
         """Update reservation and log activity."""
@@ -192,6 +198,7 @@ class ReservationViewSet(viewsets.ModelViewSet):
             
             # Send confirmation notification
             NotificationService.send_confirmation_notification(reservation)
+            NotificationService.send_in_app_reservation_confirmed(reservation)
         
         serializer = self.get_serializer(reservation)
         return Response(serializer.data)
@@ -228,6 +235,7 @@ class ReservationViewSet(viewsets.ModelViewSet):
             
             # Send cancellation notification
             NotificationService.send_cancellation_notification(reservation, reason)
+            NotificationService.send_in_app_reservation_cancelled(reservation, reason)
         
         serializer = self.get_serializer(reservation)
         return Response(serializer.data)
@@ -550,3 +558,237 @@ class PaymentViewSet(viewsets.ModelViewSet):
                 {'error': f"Erreur lors du remboursement: {str(e)}"},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+
+# --- Contract templates (read-only for agents, manage for staff) ---
+
+class ContractTemplateViewSet(viewsets.ReadOnlyModelViewSet):
+    """List and retrieve contract templates."""
+    queryset = ContractTemplate.objects.filter(is_active=True)
+    serializer_class = ContractTemplateSerializer
+    permission_classes = [IsAuthenticated, CanManageContracts]
+    filterset_fields = ['contract_type']
+
+
+# --- Contracts ---
+
+class ContractViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet for managing contracts (draft → sent → signed).
+    When contract is signed: reservation is completed and property status set to sold/rented.
+    """
+    permission_classes = [IsAuthenticated, IsContractOwnerOrAgent]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_fields = ['reservation', 'status', 'contract_type']
+    ordering_fields = ['created_at', 'sent_at', 'signed_at']
+    ordering = ['-created_at']
+
+    def get_queryset(self):
+        user = self.request.user
+        if not user.is_authenticated:
+            return Contract.objects.none()
+        qs = Contract.objects.select_related(
+            'reservation', 'reservation__property', 'created_by', 'signed_by', 'template'
+        )
+        if user.is_staff or user.is_superuser:
+            return qs
+        if getattr(user, 'role', None) in ['agent', 'manager']:
+            agency = getattr(getattr(user, 'profile', None), 'agency', None)
+            if agency:
+                return qs.filter(reservation__property__agency=agency)
+            return qs.filter(reservation__assigned_agent=user)
+        if getattr(user, 'role', None) == 'client':
+            from apps.crm.models import ClientProfile
+            client_profile = getattr(user, 'client_profile', None)
+            if client_profile:
+                return qs.filter(
+                    Q(reservation__client_profile=client_profile)
+                    | Q(reservation__client_email=user.email)
+                )
+            return qs.filter(reservation__client_email=user.email)
+        return Contract.objects.none()
+
+    def get_serializer_class(self):
+        if self.action == 'create':
+            return ContractCreateSerializer
+        if self.action in ['update', 'partial_update']:
+            return ContractUpdateSerializer
+        return ContractSerializer
+
+    def get_permissions(self):
+        if self.action == 'create':
+            return [IsAuthenticated(), CanManageContracts()]
+        return [IsAuthenticated(), IsContractOwnerOrAgent()]
+
+    def perform_create(self, serializer):
+        contract = serializer.save()
+        ReservationActivity.objects.create(
+            reservation=contract.reservation,
+            activity_type='contract_created',
+            description="Contrat créé (brouillon)",
+            performed_by=self.request.user
+        )
+        NotificationService.send_in_app_contract_created(contract)
+
+    def perform_update(self, serializer):
+        serializer.save()
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, IsContractOwnerOrAgent])
+    def upload_document(self, request, pk=None):
+        """Upload the contract document (PDF). Only when status is draft."""
+        contract = self.get_object()
+        if not contract.can_be_edited():
+            return Response(
+                {'error': 'Seul un contrat en brouillon peut recevoir un document.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        doc = request.FILES.get('document')
+        if not doc:
+            return Response(
+                {'error': 'Le fichier "document" est requis.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        contract.document = doc
+        contract.save(update_fields=['document', 'updated_at'])
+        return Response(ContractSerializer(contract).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, IsContractOwnerOrAgent])
+    def generate_pdf(self, request, pk=None):
+        """Generate contract PDF with QR code and save to contract.document (draft only)."""
+        contract = self.get_object()
+        if not contract.can_be_edited():
+            return Response(
+                {'error': 'Seul un contrat en brouillon peut générer un PDF.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            verify_base = request.build_absolute_uri('/api/reservations/contracts/verify/')
+            save_contract_pdf_to_field(contract, verify_base)
+            ReservationActivity.objects.create(
+                reservation=contract.reservation,
+                activity_type='contract_created',
+                description="PDF du contrat généré (avec QR code de vérification)",
+                performed_by=request.user
+            )
+            return Response(ContractSerializer(contract).data, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response(
+                {'error': f'Génération PDF impossible : {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, IsContractOwnerOrAgent])
+    def mark_sent(self, request, pk=None):
+        """Mark contract as sent to client. Requires document to be uploaded."""
+        contract = self.get_object()
+        if contract.status != 'draft':
+            return Response(
+                {'error': 'Seul un contrat en brouillon peut être marqué comme envoyé.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        if not contract.document:
+            return Response(
+                {'error': 'Veuillez joindre un document au contrat avant de l\'envoyer.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        with transaction.atomic():
+            contract.mark_sent()
+            ReservationActivity.objects.create(
+                reservation=contract.reservation,
+                activity_type='contract_sent',
+                description="Contrat envoyé au client",
+                performed_by=request.user
+            )
+            NotificationService.send_in_app_contract_sent(contract)
+        return Response(ContractSerializer(contract).data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsAuthenticated, IsContractOwnerOrAgent])
+    def mark_signed(self, request, pk=None):
+        """
+        Mark contract as signed. Optionally upload signed_document.
+        Completes the reservation and sets property status to sold (sale) or rented (rent).
+        """
+        contract = self.get_object()
+        if contract.status not in ('draft', 'sent'):
+            return Response(
+                {'error': 'Ce contrat est déjà signé ou archivé.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        signed_file = request.FILES.get('signed_document')
+        with transaction.atomic():
+            contract.mark_signed(user=request.user)
+            if signed_file:
+                contract.signed_document = signed_file
+                contract.save(update_fields=['signed_document', 'updated_at'])
+            ReservationActivity.objects.create(
+                reservation=contract.reservation,
+                activity_type='contract_signed',
+                description="Contrat signé",
+                performed_by=request.user
+            )
+            res = contract.reservation
+            res.complete(notes=res.completion_notes or "Contrat signé.")
+            prop = res.property
+            if contract.contract_type == 'sale':
+                prop.status = 'sold'
+            else:
+                prop.status = 'rented'
+            prop.save(update_fields=['status'])
+            NotificationService.send_in_app_contract_signed(contract)
+        return Response(ContractSerializer(contract).data, status=status.HTTP_200_OK)
+
+    @action(detail=False, methods=['get'], url_path='by-reservation/(?P<reservation_id>[^/.]+)')
+    def by_reservation(self, request, reservation_id=None):
+        """Get contract for a given reservation (if any)."""
+        user = request.user
+        if not user.is_authenticated:
+            return Response({'error': 'Authentification requise.'}, status=status.HTTP_401_UNAUTHORIZED)
+        qs = self.get_queryset().filter(reservation_id=reservation_id)
+        contract = qs.first()
+        if not contract:
+            return Response({'detail': 'Aucun contrat pour cette réservation.'}, status=status.HTTP_404_NOT_FOUND)
+        return Response(ContractSerializer(contract).data)
+
+    @action(
+        detail=False,
+        methods=['get', 'post'],
+        url_path='verify/(?P<code>[^/.]+)',
+        permission_classes=[AllowAny],
+    )
+    def verify(self, request, code=None):
+        """
+        Public endpoint for QR code verification.
+        GET: returns contract summary (authenticity check).
+        POST: mark contract as viewed/validated (optional).
+        """
+        contract = Contract.objects.filter(verification_code=code).select_related(
+            'reservation', 'reservation__property'
+        ).first()
+        if not contract:
+            return Response(
+                {'error': 'Contrat introuvable ou code invalide.', 'valid': False},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        res = contract.reservation
+        prop = res.property
+        payload = {
+            'valid': True,
+            'contract_id': str(contract.id),
+            'verification_code': contract.verification_code,
+            'status': contract.status,
+            'contract_type': contract.contract_type,
+            'property_title': prop.title,
+            'property_address': f"{prop.address_line1}, {prop.postal_code} {prop.city}",
+            'client_name': res.get_client_name(),
+            'signed_at': contract.signed_at.isoformat() if contract.signed_at else None,
+            'viewed_at': contract.viewed_at.isoformat() if contract.viewed_at else None,
+        }
+        if request.method == 'POST':
+            # Marquer comme consulté / validé
+            if not contract.viewed_at:
+                from django.utils import timezone
+                contract.viewed_at = timezone.now()
+                contract.save(update_fields=['viewed_at', 'updated_at'])
+                payload['viewed_at'] = contract.viewed_at.isoformat()
+            return Response(payload, status=status.HTTP_200_OK)
+        return Response(payload, status=status.HTTP_200_OK)

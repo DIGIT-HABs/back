@@ -14,6 +14,17 @@ from .models import User, Agency, UserProfile
 UserModel = User
 
 
+class OptionalImageField(serializers.ImageField):
+    """ImageField qui ignore les valeurs non-fichier (évite l'erreur multipart mal formé)."""
+    def to_internal_value(self, data):
+        if data is None:
+            return None
+        # Accepter uniquement un vrai fichier uploadé (objet avec read/name)
+        if hasattr(data, 'read') or (hasattr(data, 'name') and hasattr(data, 'size')):
+            return super().to_internal_value(data)
+        return None
+
+
 # Response Serializers for API Documentation
 class LogoutResponseSerializer(serializers.Serializer):
     """Serializer for logout response."""
@@ -129,6 +140,60 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return user
 
 
+class AgentCreateSerializer(serializers.Serializer):
+    """Création d'un compte agent (rattaché à une agence)."""
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True, validators=[validate_password])
+    password_confirm = serializers.CharField(write_only=True)
+    first_name = serializers.CharField(max_length=150, required=True, allow_blank=False)
+    last_name = serializers.CharField(max_length=150, required=True, allow_blank=False)
+    phone = serializers.CharField(max_length=20, required=False, allow_blank=True)
+    agency_id = serializers.UUIDField(required=False, allow_null=True)
+
+    def validate(self, attrs):
+        if attrs['password'] != attrs['password_confirm']:
+            raise serializers.ValidationError({"password_confirm": "Les mots de passe ne correspondent pas."})
+        if UserModel.objects.filter(email=attrs['email']).exists():
+            raise serializers.ValidationError({"email": "Un compte existe déjà avec cet email."})
+        return attrs
+
+    def create(self, validated_data):
+        from .models import UserProfile
+        validated_data.pop('password_confirm')
+        password = validated_data.pop('password')
+        agency_id = validated_data.pop('agency_id', None)
+        request = self.context.get('request')
+        # Agence : fournie uniquement par un admin (is_staff), sinon agence de l'utilisateur connecté
+        if agency_id and request and getattr(request.user, 'is_staff', False):
+            agency = Agency.objects.filter(pk=agency_id).first()
+            if not agency:
+                raise serializers.ValidationError({"agency_id": "Agence introuvable."})
+        else:
+            if not request or not getattr(request.user, 'profile', None) or not getattr(request.user.profile, 'agency', None):
+                raise serializers.ValidationError({"agency_id": "Vous devez être rattaché à une agence ou préciser une agence."})
+            agency = request.user.profile.agency
+        if not agency.can_add_agent():
+            raise serializers.ValidationError({"agency_id": "Quota d'agents atteint pour cette agence."})
+        username = validated_data['email'].split('@')[0]
+        base_username = username
+        counter = 1
+        while UserModel.objects.filter(username=username).exists():
+            username = f"{base_username}{counter}"
+            counter += 1
+        user = UserModel.objects.create(
+            username=username,
+            role='agent',
+            **validated_data
+        )
+        user.set_password(password)
+        user.save()
+        # Le signal crée un UserProfile avec la première agence ; on met à jour vers la bonne agence
+        profile = user.profile
+        profile.agency = agency
+        profile.save(update_fields=['agency'])
+        return user
+
+
 class UserProfileSerializer(serializers.ModelSerializer):
     """Serializer for UserProfile model."""
     
@@ -162,23 +227,34 @@ class UserProfileSerializer(serializers.ModelSerializer):
 class AgencySerializer(serializers.ModelSerializer):
     """Serializer for Agency model."""
     
-    users_count = serializers.IntegerField(source='user_set.count', read_only=True)
+    users_count = serializers.IntegerField(source='users.count', read_only=True)
     properties_count = serializers.IntegerField(source='properties.count', read_only=True)
     clients_count = serializers.IntegerField(source='clients.count', read_only=True)
+    logo_url = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = Agency
         fields = [
             'id', 'name', 'legal_name', 'license_number', 'vat_number',
-            'email', 'phone', 'website', 'address_line1', 'address_line2',
+            'email', 'phone', 'website', 'logo', 'logo_url',
+            'address_line1', 'address_line2',
             'city', 'postal_code', 'country', 'subscription_type',
             'subscription_start', 'subscription_end', 'max_agents', 'max_properties',
             'max_clients', 'features', 'is_active', 'is_trial',
             'users_count', 'properties_count', 'clients_count', 'created_at', 'updated_at'
         ]
         read_only_fields = [
-            'users_count', 'properties_count', 'clients_count', 'created_at', 'updated_at'
+            'users_count', 'properties_count', 'clients_count', 'created_at', 'updated_at', 'logo_url'
         ]
+        extra_kwargs = {'logo': {'required': False}}
+    
+    def get_logo_url(self, obj):
+        if obj.logo:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.logo.url)
+            return obj.logo.url
+        return None
     
     def validate_license_number(self, value):
         """Validate license number uniqueness."""
@@ -200,11 +276,14 @@ class AgencySerializer(serializers.ModelSerializer):
 class AgencyCreateSerializer(serializers.ModelSerializer):
     """Serializer for creating new agencies."""
     
+    logo = OptionalImageField(required=False, allow_null=True)
+    
     class Meta:
         model = Agency
         fields = [
             'name', 'legal_name', 'license_number', 'vat_number',
-            'email', 'phone', 'website', 'address_line1', 'address_line2',
+            'email', 'phone', 'website', 'logo',
+            'address_line1', 'address_line2',
             'city', 'postal_code', 'country', 'subscription_type'
         ]
     
@@ -241,6 +320,25 @@ class AgencyCreateSerializer(serializers.ModelSerializer):
         validated_data['subscription_end'] = now + timedelta(days=duration)
         
         return Agency.objects.create(**validated_data)
+
+
+class AgencyUpdateSerializer(serializers.ModelSerializer):
+    """Serializer for updating agency (e.g. logo, name)."""
+    
+    logo = OptionalImageField(required=False, allow_null=True)
+    
+    class Meta:
+        model = Agency
+        fields = [
+            'name', 'legal_name', 'website', 'logo',
+            'address_line1', 'address_line2',
+            'city', 'postal_code', 'country',
+        ]
+    
+    def validate_name(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError("Le nom est requis.")
+        return value
 
 
 class LoginSerializer(serializers.Serializer):

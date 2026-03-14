@@ -180,10 +180,157 @@ class PaymentService:
         return int(amount * (fee_percentage / 100))
 
 
+def _reservation_recipient_user_ids(reservation, include_agent=True, include_client=True):
+    """Return list of User IDs (str) to notify for a reservation (agent(s), client if has account).
+    Agent: assigned_agent, else property.agent, else all users of the property's agency.
+    """
+    ids = []
+    if include_agent:
+        # 1) Agent assigné à la réservation
+        if getattr(reservation, 'assigned_agent_id', None):
+            ids.append(str(reservation.assigned_agent_id))
+        # 2) Sinon agent du bien
+        if not ids and getattr(reservation, 'property', None):
+            prop = reservation.property
+            if getattr(prop, 'agent_id', None):
+                ids.append(str(prop.agent_id))
+            # 3) Sinon tous les utilisateurs de l'agence du bien (agents/managers)
+            if not ids and getattr(prop, 'agency_id', None):
+                agency_user_ids = User.objects.filter(
+                    profile__agency_id=prop.agency_id
+                ).values_list('id', flat=True)
+                ids.extend(str(uid) for uid in agency_user_ids)
+    if include_client and getattr(reservation, 'client_profile', None):
+        uid = getattr(reservation.client_profile, 'user_id', None)
+        if uid:
+            ids.append(str(uid))
+    if getattr(reservation, 'created_by_id', None) and reservation.created_by_id:
+        ids.append(str(reservation.created_by_id))
+    return list(dict.fromkeys(ids))  # dedupe order-preserving
+
+
 class NotificationService:
     """
-    Service for handling notifications related to reservations.
+    Service for handling notifications related to reservations (emails + in-app).
     """
+    
+    @staticmethod
+    def send_in_app_reservation_created(reservation):
+        """Notification in-app : nouvelle réservation (agent + client si compte)."""
+        try:
+            from apps.notifications.services import NotificationService as InAppNotif
+            recipient_ids = _reservation_recipient_user_ids(reservation)
+            if not recipient_ids:
+                return
+            prop_title = reservation.property.title
+            client_name = reservation.get_client_name()
+            InAppNotif.create_notification(
+                recipient_ids=recipient_ids,
+                title="Nouvelle réservation",
+                message=f"Réservation pour {prop_title} – {reservation.get_reservation_type_display()} ({client_name})",
+                notification_type="info",
+                channels=['websocket', 'in_app'],
+            )
+        except Exception as e:
+            print(f"Failed to send in-app reservation created notification: {str(e)}")
+    
+    @staticmethod
+    def send_in_app_reservation_confirmed(reservation):
+        """Notification in-app : réservation confirmée (client + agent)."""
+        try:
+            from apps.notifications.services import NotificationService as InAppNotif
+            recipient_ids = _reservation_recipient_user_ids(reservation)
+            if not recipient_ids:
+                return
+            prop_title = reservation.property.title
+            InAppNotif.create_notification(
+                recipient_ids=recipient_ids,
+                title="Réservation confirmée",
+                message=f"La réservation pour {prop_title} a été confirmée.",
+                notification_type="success",
+                channels=['websocket', 'in_app'],
+            )
+        except Exception as e:
+            print(f"Failed to send in-app reservation confirmed notification: {str(e)}")
+    
+    @staticmethod
+    def send_in_app_reservation_cancelled(reservation, reason=''):
+        """Notification in-app : réservation annulée."""
+        try:
+            from apps.notifications.services import NotificationService as InAppNotif
+            recipient_ids = _reservation_recipient_user_ids(reservation)
+            if not recipient_ids:
+                return
+            prop_title = reservation.property.title
+            InAppNotif.create_notification(
+                recipient_ids=recipient_ids,
+                title="Réservation annulée",
+                message=f"La réservation pour {prop_title} a été annulée." + (f" Raison : {reason[:80]}" if reason else ""),
+                notification_type="warning",
+                channels=['websocket', 'in_app'],
+            )
+        except Exception as e:
+            print(f"Failed to send in-app reservation cancelled notification: {str(e)}")
+    
+    @staticmethod
+    def send_in_app_contract_created(contract):
+        """Notification in-app : contrat créé (client si compte)."""
+        try:
+            from apps.notifications.services import NotificationService as InAppNotif
+            res = contract.reservation
+            recipient_ids = _reservation_recipient_user_ids(res, include_agent=True, include_client=True)
+            if not recipient_ids:
+                return
+            prop_title = res.property.title
+            InAppNotif.create_notification(
+                recipient_ids=recipient_ids,
+                title="Contrat créé",
+                message=f"Un contrat a été créé pour votre réservation – {prop_title}.",
+                notification_type="info",
+                channels=['websocket', 'in_app'],
+            )
+        except Exception as e:
+            print(f"Failed to send in-app contract created notification: {str(e)}")
+    
+    @staticmethod
+    def send_in_app_contract_sent(contract):
+        """Notification in-app : contrat envoyé au client."""
+        try:
+            from apps.notifications.services import NotificationService as InAppNotif
+            res = contract.reservation
+            recipient_ids = _reservation_recipient_user_ids(res, include_agent=True, include_client=True)
+            if not recipient_ids:
+                return
+            prop_title = res.property.title
+            InAppNotif.create_notification(
+                recipient_ids=recipient_ids,
+                title="Contrat envoyé",
+                message=f"Le contrat pour {prop_title} vous a été envoyé. Vous pouvez le consulter et le signer.",
+                notification_type="info",
+                channels=['websocket', 'in_app'],
+            )
+        except Exception as e:
+            print(f"Failed to send in-app contract sent notification: {str(e)}")
+    
+    @staticmethod
+    def send_in_app_contract_signed(contract):
+        """Notification in-app : contrat signé (agent + client)."""
+        try:
+            from apps.notifications.services import NotificationService as InAppNotif
+            res = contract.reservation
+            recipient_ids = _reservation_recipient_user_ids(res, include_agent=True, include_client=True)
+            if not recipient_ids:
+                return
+            prop_title = res.property.title
+            InAppNotif.create_notification(
+                recipient_ids=recipient_ids,
+                title="Contrat signé",
+                message=f"Le contrat pour {prop_title} a été signé. La réservation est finalisée.",
+                notification_type="success",
+                channels=['websocket', 'in_app'],
+            )
+        except Exception as e:
+            print(f"Failed to send in-app contract signed notification: {str(e)}")
     
     @staticmethod
     def send_visit_confirmation(reservation):
