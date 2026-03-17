@@ -25,12 +25,31 @@ def _get_contract_context(contract):
     """Build placeholder context from contract and reservation."""
     res = contract.reservation
     prop = res.property
+    agency = getattr(prop, 'agency', None)
+    agent = res.assigned_agent or getattr(prop, 'agent', None)
+    agent_profile = getattr(agent, 'profile', None) if agent else None
     client_name = res.get_client_name()
     client_email = res.get_client_email() or ''
     amount = (res.purchase_price or res.amount or 0)
     scheduled = res.scheduled_date.strftime('%d/%m/%Y') if res.scheduled_date else ''
     scheduled_time = res.scheduled_date.strftime('%H:%M') if res.scheduled_date else ''
     return {
+        # Agency
+        'agency_name': getattr(agency, 'name', '') or '',
+        'agency_legal_name': getattr(agency, 'legal_name', '') or '',
+        'agency_license_number': getattr(agency, 'license_number', '') or '',
+        'agency_email': getattr(agency, 'email', '') or '',
+        'agency_phone': getattr(agency, 'phone', '') or '',
+        'agency_address_line1': getattr(agency, 'address_line1', '') or '',
+        'agency_address_line2': getattr(agency, 'address_line2', '') or '',
+        'agency_city': getattr(agency, 'city', '') or '',
+        'agency_postal_code': getattr(agency, 'postal_code', '') or '',
+        'agency_country': getattr(agency, 'country', '') or '',
+        # Agent
+        'agent_name': agent.get_full_name() if agent else '',
+        'agent_email': getattr(agent, 'email', '') if agent else '',
+        'agent_phone': getattr(agent, 'phone', '') if agent else '',
+
         'client_name': client_name,
         'client_email': client_email,
         'property_title': prop.title,
@@ -102,6 +121,57 @@ def generate_contract_pdf(contract, verify_base_url):
     )
 
     story = []
+
+    # Header: Agency + Agent
+    res = contract.reservation
+    prop = res.property
+    agency = getattr(prop, 'agency', None)
+    agent = res.assigned_agent or getattr(prop, 'agent', None)
+    agent_profile = getattr(agent, 'profile', None) if agent else None
+
+    # Logo agence si disponible en local
+    if agency and getattr(agency, 'logo', None):
+        try:
+            logo_path = agency.logo.path
+            if os.path.exists(logo_path):
+                story.append(Image(logo_path, width=3.2*cm, height=1.2*cm))
+                story.append(Spacer(1, 0.2*cm))
+        except Exception:
+            pass
+
+    agency_name = getattr(agency, 'name', '') if agency else ''
+    if agency_name:
+        story.append(Paragraph(f"<b>Agence :</b> {agency_name}", styles['Normal']))
+        agency_line = []
+        if getattr(agency, 'address_line1', None):
+            agency_line.append(getattr(agency, 'address_line1', ''))
+        if getattr(agency, 'city', None):
+            agency_line.append(getattr(agency, 'city', ''))
+        if agency_line:
+            story.append(Paragraph(" · ".join([str(x) for x in agency_line if x]), styles['Normal']))
+        agency_contacts = []
+        if getattr(agency, 'phone', None):
+            agency_contacts.append(str(getattr(agency, 'phone', '')))
+        if getattr(agency, 'email', None):
+            agency_contacts.append(str(getattr(agency, 'email', '')))
+        if agency_contacts:
+            story.append(Paragraph(" | ".join([c for c in agency_contacts if c]), styles['Normal']))
+        if getattr(agency, 'license_number', None):
+            story.append(Paragraph(f"N° Licence : {getattr(agency, 'license_number', '')}", styles['Normal']))
+
+    if agent:
+        agent_line = f"<b>Agent :</b> {agent.get_full_name() or agent.email}"
+        story.append(Spacer(1, 0.1*cm))
+        story.append(Paragraph(agent_line, styles['Normal']))
+        agent_contacts = []
+        if getattr(agent, 'phone', None):
+            agent_contacts.append(str(getattr(agent, 'phone', '')))
+        if getattr(agent, 'email', None):
+            agent_contacts.append(str(getattr(agent, 'email', '')))
+        if agent_contacts:
+            story.append(Paragraph(" | ".join([c for c in agent_contacts if c]), styles['Normal']))
+
+    story.append(Spacer(1, 0.6*cm))
 
     # Titre
     story.append(Paragraph("CONTRAT DIGIT-HAB", title_style))
