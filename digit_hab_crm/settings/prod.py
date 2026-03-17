@@ -99,7 +99,7 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Media files for production
 MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_ROOT = BASE_DIR.parent / 'media'  # => /app/media
 
 # Performance optimization
 DATA_UPLOAD_MAX_MEMORY_SIZE = 5242880  # 5MB
