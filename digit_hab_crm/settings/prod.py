@@ -15,7 +15,7 @@ ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_env.split(',') if host.s
     'api.digit-hab.altoppe.sn',
     'localhost',
     '127.0.0.1',
-    '192.168.1.25',
+    '192.168.1.3',
 ]
 
 # Security settings

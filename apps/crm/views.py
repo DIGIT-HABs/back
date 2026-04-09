@@ -60,8 +60,18 @@ class ClientProfileViewSet(viewsets.ModelViewSet):
             # Admin can see all client profiles
             queryset = queryset
         elif user.role == 'agent':
-            # Agent can see profiles for their agency's clients
-            queryset = queryset.filter(user__profile__agency=user.agency)
+            # Agent can see:
+            # 1) clients whose user profile is already attached to their agency
+            # 2) clients linked to reservations on properties of their agency
+            #    (even if the client user profile stays in the DEFAULT-CLIENTS agency)
+            reservation_client_ids = Reservation.objects.filter(
+                client_profile__isnull=False,
+                property__agency=user.agency,
+            ).values_list('client_profile_id', flat=True).distinct()
+
+            queryset = queryset.filter(
+                Q(user__profile__agency=user.agency) | Q(id__in=reservation_client_ids)
+            )
         elif user.role == 'client':
             # Client can only see their own profile
             return queryset.filter(user=user)

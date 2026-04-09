@@ -237,7 +237,7 @@ class ReservationSerializer(serializers.ModelSerializer):
                 status__in=['pending', 'confirmed']
             ).exclude(pk=getattr(self.instance, 'pk', None))
             if existing.exists():
-                raise serializers.ValidationError("Cette adresse email a déjà une réservation active.")
+                raise serializers.ValidationError("Cette adresse email a déjà une réservation en attente ou confirmée.")
         return value
     
     def validate(self, data):
@@ -289,6 +289,33 @@ class ReservationCreateSerializer(ReservationSerializer):
         read_only_fields = ReservationSerializer.Meta.read_only_fields + [
             'confirmed_at', 'cancelled_at', 'completed_at', 'payment_status'
         ]
+
+    def create(self, validated_data):
+        """
+        Si un utilisateur "client" crée une réservation, on crée/attache automatiquement
+        un ClientProfile CRM à ce compte et on le lie à la réservation.
+        """
+        request = self.context.get('request')
+        user = getattr(request, 'user', None) if request else None
+
+        if user and getattr(user, 'role', None) == 'client' and not validated_data.get('client_profile'):
+            # Créer le profil CRM si besoin
+            from apps.crm.models import ClientProfile
+            client_profile, _ = ClientProfile.objects.get_or_create(
+                user=user,
+                defaults={
+                    'preferred_contact_method': getattr(user, 'preferred_contact_method', 'email') or 'email',
+                    'status': 'prospect',
+                },
+            )
+            validated_data['client_profile'] = client_profile
+
+            # Compléter les infos "snapshot" si elles sont vides (utile si pas client_profile_id)
+            validated_data.setdefault('client_name', user.get_full_name() or user.username)
+            validated_data.setdefault('client_email', user.email or '')
+            validated_data.setdefault('client_phone', getattr(user, 'phone', '') or '')
+
+        return super().create(validated_data)
 
 
 class ReservationUpdateSerializer(ReservationSerializer):
@@ -483,9 +510,9 @@ class ContractCreateSerializer(serializers.ModelSerializer):
             res = Reservation.objects.get(id=value)
         except Reservation.DoesNotExist:
             raise serializers.ValidationError("Réservation introuvable.")
-        if res.status != 'confirmed':
+        if res.status not in ['confirmed', 'completed']:
             raise serializers.ValidationError(
-                "Un contrat ne peut être créé que pour une réservation confirmée."
+                "Un contrat ne peut être créé que pour une réservation confirmée ou terminée."
             )
         if hasattr(res, 'contract') and res.contract:
             raise serializers.ValidationError("Cette réservation a déjà un contrat.")

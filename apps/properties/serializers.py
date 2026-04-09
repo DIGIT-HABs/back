@@ -14,7 +14,7 @@ class PropertyImageSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = PropertyImage
-        fields = ['id', 'image', 'thumbnail', 'title', 'description', 'alt_text', 'is_primary', 'order', 'created_at']
+        fields = ['id', 'image', 'description', 'thumbnail', 'title', 'description', 'alt_text', 'is_primary', 'order', 'created_at']
         read_only_fields = ['id', 'thumbnail', 'created_at']
 
 
@@ -220,7 +220,7 @@ class PropertyListSerializer(serializers.ModelSerializer):
     class Meta:
         model = Property
         fields = [
-            'id', 'title', 'property_type', 'status',
+            'id', 'title', 'description', 'property_type', 'status',
             'price', 'full_price', 'surface_area', 'bedrooms', 'bathrooms', 'city',
             'agent_name', 'is_featured', 'primary_image_url', 'price_per_sqm',
             'created_at', 'property_type_display'
@@ -250,5 +250,5 @@ class PropertySearchSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Property
-        fields = ['id', 'title', 'property_type', 'status', 
+        fields = ['id', 'title', 'description', 'property_type', 'status', 
                  'price', 'surface_area', 'bedrooms', 'bathrooms', 'city', 'latitude', 'longitude', 'property_type_display']

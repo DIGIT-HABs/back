@@ -129,7 +129,7 @@ class ReservationViewSet(viewsets.ModelViewSet):
         """Create reservation and log activity."""
         with transaction.atomic():
             reservation = serializer.save()
-            
+            user = self.request.user
             # Log activity
             ReservationActivity.objects.create(
                 reservation=reservation,
@@ -137,7 +137,19 @@ class ReservationViewSet(viewsets.ModelViewSet):
                 description=f"Réservation créée par {self.request.user.get_full_name()}",
                 performed_by=self.request.user
             )
-            
+            # If a "client" user creates a reservation, automatically create/attach a CRM ClientProfile to this account and link it to the reservation.
+            if user.role == 'client' and not reservation.client_profile:
+                client_profile, _ = ClientProfile.objects.get_or_create(
+                    user=user,
+                    defaults={
+                        'preferred_contact_method': getattr(user, 'preferred_contact_method', 'email') or 'email',
+                        'status': 'prospect',
+                        'priority_level': 'medium',
+                    },
+                )
+                reservation.client_profile = client_profile
+                reservation.save()
+
             # Send notification if it's a visit reservation
             if reservation.reservation_type == 'visit':
                 NotificationService.send_visit_confirmation(reservation)

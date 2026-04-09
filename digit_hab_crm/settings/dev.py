@@ -6,31 +6,31 @@ from .base import *
 
 # Development specific settings
 DEBUG = True
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0', '[::1]', '192.168.1.25', '*']
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0', '[::1]', '192.168.1.3', '*']
 
 
 # SQLITE
 # DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': BASE_DIR / 'db.sqlite3'}}
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'base.db',
-    }
-}
-
-# # Database - Development
 # DATABASES = {
 #     'default': {
-#         'ENGINE': 'django.db.backends.postgresql',
-#         'NAME': 'digit_hab_crm_dev',
-#         'USER': 'postgres',
-#         'PASSWORD': 'password',
-#         'HOST': 'localhost',
-#         'PORT': '5432',
-#         'OPTIONS': {
-#         },
+#         'ENGINE': 'django.db.backends.sqlite3',
+#         'NAME': BASE_DIR / 'base.db',
 #     }
 # }
+
+# # Database - Development
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': 'digit_hab_crm_dev',
+        'USER': 'postgres',
+        'PASSWORD': 'password',
+        'HOST': 'localhost',
+        'PORT': '5432',
+        'OPTIONS': {
+        },
+    }
+}
 
 # Email backend for development
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
