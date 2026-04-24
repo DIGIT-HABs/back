@@ -2,6 +2,7 @@
 Serializers for authentication app.
 """
 
+from decimal import Decimal, InvalidOperation
 from django.contrib.auth import authenticate, get_user_model
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -231,6 +232,7 @@ class AgencySerializer(serializers.ModelSerializer):
     properties_count = serializers.IntegerField(source='properties.count', read_only=True)
     clients_count = serializers.IntegerField(source='clients.count', read_only=True)
     logo_url = serializers.SerializerMethodField(read_only=True)
+    commission_rate = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = Agency
@@ -241,6 +243,7 @@ class AgencySerializer(serializers.ModelSerializer):
             'city', 'postal_code', 'country', 'subscription_type',
             'subscription_start', 'subscription_end', 'max_agents', 'max_properties',
             'max_clients', 'features', 'is_active', 'is_trial',
+            'commission_rate',
             'users_count', 'properties_count', 'clients_count', 'created_at', 'updated_at'
         ]
         read_only_fields = [
@@ -255,6 +258,14 @@ class AgencySerializer(serializers.ModelSerializer):
                 return request.build_absolute_uri(obj.logo.url)
             return obj.logo.url
         return None
+
+    def get_commission_rate(self, obj):
+        """Retourne le taux de commission (%) stocké dans settings, fallback à 3.00."""
+        rate = (obj.settings or {}).get('commission_rate', '3.00')
+        try:
+            return str(Decimal(str(rate)))
+        except (InvalidOperation, TypeError):
+            return '3.00'
     
     def validate_license_number(self, value):
         """Validate license number uniqueness."""
@@ -326,6 +337,14 @@ class AgencyUpdateSerializer(serializers.ModelSerializer):
     """Serializer for updating agency (e.g. logo, name)."""
     
     logo = OptionalImageField(required=False, allow_null=True)
+    commission_rate = serializers.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        min_value=Decimal('0.00'),
+        max_value=Decimal('100.00'),
+        required=False,
+        help_text="Taux de commission (%) appliqué par défaut aux contrats signés."
+    )
     
     class Meta:
         model = Agency
@@ -333,12 +352,24 @@ class AgencyUpdateSerializer(serializers.ModelSerializer):
             'name', 'legal_name', 'website', 'logo',
             'address_line1', 'address_line2',
             'city', 'postal_code', 'country',
+            'commission_rate',
         ]
     
     def validate_name(self, value):
         if not value or not value.strip():
             raise serializers.ValidationError("Le nom est requis.")
         return value
+
+    def update(self, instance, validated_data):
+        """Persiste commission_rate dans Agency.settings['commission_rate']."""
+        commission_rate = validated_data.pop('commission_rate', None)
+        instance = super().update(instance, validated_data)
+        if commission_rate is not None:
+            settings = instance.settings or {}
+            settings['commission_rate'] = str(commission_rate)
+            instance.settings = settings
+            instance.save(update_fields=['settings', 'updated_at'])
+        return instance
 
 
 class LoginSerializer(serializers.Serializer):

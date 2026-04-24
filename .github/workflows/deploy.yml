@@ -49,9 +49,12 @@ jobs:
             echo "🔄 Starting deployment..."
             cd $PROJECT_DIR
             
+            git fetch origin t1
+            git reset --hard origin/t1
+            
             # Execute deployment script
-            chmod +x Django/deploy-final.sh
-            ./Django/deploy-final.sh
+            chmod +x deploy-final.sh
+            ./deploy-final.sh
             
             echo "✅ Deployment completed!"
           ENDSSH

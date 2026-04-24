@@ -2,6 +2,7 @@
 Serializers for reservations management API.
 """
 
+from decimal import Decimal
 from rest_framework import serializers
 from django.utils import timezone
 from django.core.exceptions import ValidationError
@@ -314,6 +315,30 @@ class ReservationCreateSerializer(ReservationSerializer):
             validated_data.setdefault('client_name', user.get_full_name() or user.username)
             validated_data.setdefault('client_email', user.email or '')
             validated_data.setdefault('client_phone', getattr(user, 'phone', '') or '')
+
+        # Location: facturation par nuit (base = prix du bien * nb de nuits).
+        # Si le frontend n'a pas envoyé amount, on le calcule côté backend.
+        if validated_data.get('reservation_type') == 'rent':
+            start = validated_data.get('scheduled_date')
+            end = validated_data.get('scheduled_end_date')
+            property_obj = validated_data.get('property')
+            if not property_obj and validated_data.get('property_id'):
+                try:
+                    property_obj = Property.objects.get(id=validated_data.get('property_id'))
+                except Property.DoesNotExist:
+                    property_obj = None
+
+            if start and end and end > start:
+                delta = end - start
+                nights = max(1, delta.days)
+                # Si heure de fin dépasse heure de début, compter une nuit supplémentaire.
+                if delta.seconds > 0:
+                    nights += 1
+
+                validated_data['duration_minutes'] = nights * 24 * 60
+
+                if property_obj and validated_data.get('amount') in (None, ''):
+                    validated_data['amount'] = (property_obj.price or Decimal('0')) * Decimal(nights)
 
         return super().create(validated_data)
 
